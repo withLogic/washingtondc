@@ -44,6 +44,16 @@ public:
         cpu->reg.sr = Sh4::SR_MD_MASK;
     }
 
+    /*
+     * return a string representing the name of the
+     * given general-purpose register
+     */
+    static std::string gen_reg_name(unsigned reg_no) {
+        std::stringstream ss;
+        ss << "R" << reg_no;
+        return ss.str();
+    }
+
     // very basic test that does a whole lot of nothing
     static int nop_test(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
         Sh4Prog test_prog;
@@ -4244,15 +4254,16 @@ public:
         return failure;
     }
 
-    // LDS Rm, MACH
-    // 0100mmmm00001010
-    static int do_binary_lds_gen_mach(Sh4 *cpu, Memory *mem,
-                                      unsigned reg_no, reg32_t val) {
+    // common test infrastructure for LDS unit_tests
+    static int do_binary_lds(Sh4 *cpu, Memory *mem,
+                             std::string src_name, reg32_t *src_ptr,
+                             std::string dst_name, reg32_t *dst_ptr,
+                             reg32_t src_val) {
         Sh4Prog test_prog;
         std::stringstream ss;
         std::string cmd;
 
-        ss << "LDS R" << reg_no << ", MACH\n";
+        ss << "LDS " << src_name << ", " << dst_name << "\n";
         cmd = ss.str();
         test_prog.assemble(cmd);
         const Sh4Prog::InstList& inst = test_prog.get_prog();
@@ -4260,114 +4271,54 @@ public:
 
         reset_cpu(cpu);
 
-        *cpu->gen_reg(reg_no) = val;
+        *src_ptr = src_val;
         cpu->exec_inst();
 
-        if (cpu->reg.mach != val) {
+        if (*dst_ptr != src_val) {
             std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "expected val is " << val << std::endl;
-            std::cout << "actual val is " << cpu->reg.mach << std::endl;
+            std::cout << "expected val is " << src_val << std::endl;
+            std::cout << "actual val is " << *dst_ptr << std::endl;
             return 1;
         }
 
         return 0;
     }
 
-    static int binary_lds_gen_mach(Sh4 *cpu, Memory *mem,
-                                   RandGen32 *randgen32) {
+    static int binary_lds_test_wrapper(Sh4 *cpu, Memory *mem,
+                                       RandGen32 *randgen32,
+                                       char const *dst_name, reg32_t *dst) {
         int failure = 0;
-
         for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
             failure = failure ||
-                do_binary_lds_gen_mach(cpu, mem, reg_no,
-                                       randgen32->pick_val(0));
+                do_binary_lds(cpu, mem,
+                              gen_reg_name(reg_no), cpu->gen_reg(reg_no),
+                              dst_name, dst, randgen32->pick_val(0));
         }
-
         return failure;
+    }
+
+    // LDS Rm, MACH
+    // 0100mmmm00001010
+    static int binary_lds_gen_mach(Sh4 *cpu, Memory *mem,
+                                   RandGen32 *randgen32) {
+        return binary_lds_test_wrapper(cpu, mem, randgen32,
+                                       "MACH", &cpu->reg.mach);
     }
 
     // LDS Rm, MACL
     // 0100mmmm00011010
-    static int do_binary_lds_gen_macl(Sh4 *cpu, Memory *mem,
-                                      unsigned reg_no, reg32_t val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "LDS R" << reg_no << ", MACL\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        *cpu->gen_reg(reg_no) = val;
-        cpu->exec_inst();
-
-        if (cpu->reg.macl != val) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "expected val is " << val << std::endl;
-            std::cout << "actual val is " << cpu->reg.macl << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_lds_gen_macl(Sh4 *cpu, Memory *mem,
                                    RandGen32 *randgen32) {
-        int failure = 0;
-
-        for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
-            failure = failure ||
-                do_binary_lds_gen_macl(cpu, mem, reg_no,
-                                       randgen32->pick_val(0));
-        }
-
-        return failure;
+        return binary_lds_test_wrapper(cpu, mem, randgen32,
+                                       "MACL", &cpu->reg.macl);
     }
 
     // LDS Rm, PR
     // 0100mmmm00101010
-    static int do_binary_lds_gen_pr(Sh4 *cpu, Memory *mem,
-                                      unsigned reg_no, reg32_t val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "LDS R" << reg_no << ", PR\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        *cpu->gen_reg(reg_no) = val;
-        cpu->exec_inst();
-
-        if (cpu->reg.pr != val) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "expected val is " << val << std::endl;
-            std::cout << "actual val is " << cpu->reg.pr << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_lds_gen_pr(Sh4 *cpu, Memory *mem,
                                    RandGen32 *randgen32) {
-        int failure = 0;
-
-        for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
-            failure = failure ||
-                do_binary_lds_gen_pr(cpu, mem, reg_no,
-                                       randgen32->pick_val(0));
-        }
-
-        return failure;
+        return binary_lds_test_wrapper(cpu, mem, randgen32,
+                                       "PR", &cpu->reg.pr);
     }
 };
 
