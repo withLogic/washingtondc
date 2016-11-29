@@ -54,6 +54,39 @@ public:
         return ss.str();
     }
 
+    // common test infrastructure for LDS unit_tests
+    static int do_binary_reg_reg(Sh4 *cpu, Memory *mem,
+                                 std::string opcode,
+                                 std::string src_name, reg32_t *src_ptr,
+                                 std::string dst_name, reg32_t *dst_ptr,
+                                 reg32_t src_val) {
+        Sh4Prog test_prog;
+        std::stringstream ss;
+        std::string cmd;
+
+        ss << opcode << " " << src_name << ", " << dst_name << "\n";
+        cmd = ss.str();
+        test_prog.assemble(cmd);
+        const Sh4Prog::InstList& inst = test_prog.get_prog();
+        mem->load_program(0, inst.begin(), inst.end());
+
+        reset_cpu(cpu);
+
+        *src_ptr = src_val;
+        cpu->exec_inst();
+
+        if (*dst_ptr != src_val) {
+            std::cout << "ERROR while running " << cmd << std::endl;
+            std::cout << "expected val is " << std::hex << src_val << std::endl;
+            std::cout << "actual val is " << *dst_ptr << std::endl;
+            reset_cpu(cpu); // in case SR (or other state register) changed
+            return 1;
+        }
+
+        reset_cpu(cpu); // in case SR (or other state register) changed
+        return 0;
+    }
+
     // very basic test that does a whole lot of nothing
     static int nop_test(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
         Sh4Prog test_prog;
@@ -909,41 +942,18 @@ public:
 
     // MOV Rm, Rn
     // 0110nnnnmmmm0011
-    static int do_mov_binary_gen_gen(Sh4 *cpu, Memory *mem, reg32_t src_val,
-                                     unsigned reg_src, unsigned reg_dst) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "MOV R" << reg_src << ", R" << reg_dst << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-        *cpu->gen_reg(reg_src) = src_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(reg_dst) != src_val) {
-            std::cout << "While running: " << cmd << std::endl;
-            std::cout << "src_val is " << std::hex << src_val << std::endl;
-            std::cout << "actual val is " << std::hex <<
-                *cpu->gen_reg(reg_dst) << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int mov_binary_gen_gen(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
         int failed = 0;
 
         for (unsigned reg_src = 0; reg_src < 16; reg_src++) {
             for (unsigned reg_dst = 0; reg_dst < 16; reg_dst++) {
                 failed = failed ||
-                    do_mov_binary_gen_gen(cpu, mem, randgen32->pick_val(0),
-                                          reg_src, reg_dst);
+                    do_binary_reg_reg(cpu, mem, "MOV",
+                                      gen_reg_name(reg_src),
+                                      cpu->gen_reg(reg_src),
+                                      gen_reg_name(reg_dst),
+                                      cpu->gen_reg(reg_dst),
+                                      randgen32->pick_val(0));
             }
         }
         return failed;
@@ -2833,244 +2843,59 @@ public:
         return failure;
     }
 
-    // LDC Rm, SR
-    // 0100mmmm00001110
-    static int do_binary_ldc_gen_sr(Sh4 *cpu, Memory *mem,
-                                    unsigned reg_no, reg32_t reg_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "LDC R" << reg_no << ", SR\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-        *cpu->gen_reg(reg_no) = reg_val;
-        cpu->exec_inst();
-
-        if (cpu->reg.sr != reg_val) {
-            std::cout << "While running: " << cmd << std::endl;
-            std::cout << "reg_val is " << std::hex << reg_val << std::endl;
-            std::cout << "actual val is " << std::hex <<
-                cpu->reg.sr << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
-    static int binary_ldc_gen_sr(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
+    static int binary_ldc_test_wrapper(Sh4 *cpu, Memory *mem,
+                                       RandGen32 *randgen32,
+                                       char const *dst_name, reg32_t *dstp) {
         int failure = 0;
-
         for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
             failure = failure ||
-                do_binary_ldc_gen_sr(cpu, mem, reg_no, randgen32->pick_val(0));
+                do_binary_reg_reg(cpu, mem, "LDC", gen_reg_name(reg_no),
+                                  cpu->gen_reg(reg_no), dst_name, dstp,
+                                  randgen32->pick_val(0));
         }
-
         return failure;
+    }
+
+    // LDC Rm, SR
+    // 0100mmmm00001110
+    static int binary_ldc_gen_sr(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
+        return binary_ldc_test_wrapper(cpu, mem, randgen32,
+                                       "SR", &cpu->reg.sr);
     }
 
     // LDC Rm, GBR
     // 0100mmmm00011110
-    static int do_binary_ldc_gen_gbr(Sh4 *cpu, Memory *mem,
-                                     unsigned reg_no, reg32_t reg_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "LDC R" << reg_no << ", GBR\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-        *cpu->gen_reg(reg_no) = reg_val;
-        cpu->exec_inst();
-
-        if (cpu->reg.gbr != reg_val) {
-            std::cout << "While running: " << cmd << std::endl;
-            std::cout << "reg_val is " << std::hex << reg_val << std::endl;
-            std::cout << "actual val is " << std::hex <<
-                cpu->reg.gbr << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_ldc_gen_gbr(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
-        int failure = 0;
-
-        for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
-            failure = failure ||
-                do_binary_ldc_gen_gbr(cpu, mem, reg_no, randgen32->pick_val(0));
-        }
-
-        return failure;
+        return binary_ldc_test_wrapper(cpu, mem, randgen32,
+                                       "GBR", &cpu->reg.gbr);
     }
 
     // LDC Rm, VBR
     // 0100mmmm00101110
-    static int do_binary_ldc_gen_vbr(Sh4 *cpu, Memory *mem,
-                                     unsigned reg_no, reg32_t reg_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "LDC R" << reg_no << ", VBR\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-        *cpu->gen_reg(reg_no) = reg_val;
-        cpu->exec_inst();
-
-        if (cpu->reg.vbr != reg_val) {
-            std::cout << "While running: " << cmd << std::endl;
-            std::cout << "reg_val is " << std::hex << reg_val << std::endl;
-            std::cout << "actual val is " << std::hex <<
-                cpu->reg.vbr << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_ldc_gen_vbr(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
-        int failure = 0;
-
-        for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
-            failure = failure ||
-                do_binary_ldc_gen_vbr(cpu, mem, reg_no, randgen32->pick_val(0));
-        }
-
-        return failure;
+        return binary_ldc_test_wrapper(cpu, mem, randgen32,
+                                       "VBR", &cpu->reg.vbr);
     }
 
     // LDC Rm, SSR
     // 0100mmmm00111110
-    static int do_binary_ldc_gen_ssr(Sh4 *cpu, Memory *mem,
-                                     unsigned reg_no, reg32_t reg_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "LDC R" << reg_no << ", SSR\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-        *cpu->gen_reg(reg_no) = reg_val;
-        cpu->exec_inst();
-
-        if (cpu->reg.ssr != reg_val) {
-            std::cout << "While running: " << cmd << std::endl;
-            std::cout << "reg_val is " << std::hex << reg_val << std::endl;
-            std::cout << "actual val is " << std::hex <<
-                cpu->reg.ssr << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_ldc_gen_ssr(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
-        int failure = 0;
-
-        for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
-            failure = failure ||
-                do_binary_ldc_gen_ssr(cpu, mem, reg_no, randgen32->pick_val(0));
-        }
-
-        return failure;
+        return binary_ldc_test_wrapper(cpu, mem, randgen32,
+                                       "SSR", &cpu->reg.ssr);
     }
 
     // LDC Rm, SPC
     // 0100mmmm01001110
-    static int do_binary_ldc_gen_spc(Sh4 *cpu, Memory *mem,
-                                     unsigned reg_no, reg32_t reg_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "LDC R" << reg_no << ", SPC\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-        *cpu->gen_reg(reg_no) = reg_val;
-        cpu->exec_inst();
-
-        if (cpu->reg.spc != reg_val) {
-            std::cout << "While running: " << cmd << std::endl;
-            std::cout << "reg_val is " << std::hex << reg_val << std::endl;
-            std::cout << "actual val is " << std::hex <<
-                cpu->reg.spc << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_ldc_gen_spc(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
-        int failure = 0;
-
-        for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
-            failure = failure ||
-                do_binary_ldc_gen_spc(cpu, mem, reg_no, randgen32->pick_val(0));
-        }
-
-        return failure;
+        return binary_ldc_test_wrapper(cpu, mem, randgen32,
+                                       "SPC", &cpu->reg.spc);
     }
 
     // LDC Rm, DBR
     // 0100mmmm11111010
-    static int do_binary_ldc_gen_dbr(Sh4 *cpu, Memory *mem,
-                                     unsigned reg_no, reg32_t reg_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "LDC R" << reg_no << ", DBR\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-        *cpu->gen_reg(reg_no) = reg_val;
-        cpu->exec_inst();
-
-        if (cpu->reg.dbr != reg_val) {
-            std::cout << "While running: " << cmd << std::endl;
-            std::cout << "reg_val is " << std::hex << reg_val << std::endl;
-            std::cout << "actual val is " << std::hex <<
-                cpu->reg.dbr << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_ldc_gen_dbr(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
-        int failure = 0;
-
-        for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
-            failure = failure ||
-                do_binary_ldc_gen_dbr(cpu, mem, reg_no, randgen32->pick_val(0));
-        }
-
-        return failure;
+        return binary_ldc_test_wrapper(cpu, mem, randgen32,
+                                       "DBR", &cpu->reg.dbr);
     }
 
     // LDC Rm, Rn_BANK
@@ -3439,298 +3264,73 @@ public:
         return failure;
     }
 
-    // STC SR, Rn
-    // 0000nnnn00000010
-    static int do_binary_stc_sr_gen(Sh4 *cpu, Memory *mem, unsigned reg_dst,
-                                    reg32_t sr_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
+    static int binary_stc_test_wrapper(Sh4 *cpu, Memory *mem,
+                                       RandGen32 *randgen32,
+                                       char const *src_name, reg32_t *srcp) {
+        int failure = 0;
+        for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
+            reg32_t src_val = randgen32->pick_val(0);
 
-        /*
-         * using random values for SR is a little messy 'cause it has side
-         * effects.  In the future I may decide not to use random values for
-         * this test.
-         */
-        sr_val |= Sh4::SR_MD_MASK;
-
-        ss << "STC SR, R" << reg_dst << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        cpu->reg.sr = sr_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(reg_dst) != sr_val) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "Expected value was " << std::hex << sr_val <<
-                std::endl;
-            std::cout << "Actual value is " << cpu->reg.sr << std::endl;
-            return 1;
+            // don't accidentally disable privileged mode or switch banks
+            if (srcp == &cpu->reg.sr) {
+                src_val |= Sh4::SR_MD_MASK;
+                src_val &= ~Sh4::SR_RB_MASK;
+            }
+            failure = failure ||
+                do_binary_reg_reg(cpu, mem, "STC", src_name, srcp,
+                                  gen_reg_name(reg_no), cpu->gen_reg(reg_no),
+                                  src_val);
         }
-
-        return 0;
+        return failure;
     }
 
+    // STC SR, Rn
+    // 0000nnnn00000010
     static int binary_stc_sr_gen(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
-        int failure = 0;
-
-        for (int reg_no = 0; reg_no < 16; reg_no++) {
-            failure = failure ||
-                do_binary_stc_sr_gen(cpu, mem, reg_no, randgen32->pick_val(0));
-        }
-
-        return failure;
+        return binary_stc_test_wrapper(cpu, mem, randgen32,
+                                       "SR", &cpu->reg.sr);
     }
 
     // STC GBR, Rn
     // 0000nnnn00010010
-    static int do_binary_stc_gbr_gen(Sh4 *cpu, Memory *mem, unsigned reg_dst,
-                                     reg32_t gbr_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "STC GBR, R" << reg_dst << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        cpu->reg.gbr = gbr_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(reg_dst) != gbr_val) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "Expected value was " << std::hex << gbr_val <<
-                std::endl;
-            std::cout << "Actual value is " << cpu->reg.gbr << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_stc_gbr_gen(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
-        int failure = 0;
-
-        for (int reg_no = 0; reg_no < 16; reg_no++) {
-            failure = failure ||
-                do_binary_stc_gbr_gen(cpu, mem, reg_no, randgen32->pick_val(0));
-        }
-
-        return failure;
+        return binary_stc_test_wrapper(cpu, mem, randgen32,
+                                       "GBR", &cpu->reg.gbr);
     }
 
     // STC VBR, Rn
     // 0000nnnn00100010
-    static int do_binary_stc_vbr_gen(Sh4 *cpu, Memory *mem, unsigned reg_dst,
-                                     reg32_t vbr_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "STC VBR, R" << reg_dst << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        cpu->reg.vbr = vbr_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(reg_dst) != vbr_val) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "Expected value was " << std::hex << vbr_val <<
-                std::endl;
-            std::cout << "Actual value is " << cpu->reg.vbr << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_stc_vbr_gen(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
-        int failure = 0;
-
-        for (int reg_no = 0; reg_no < 16; reg_no++) {
-            failure = failure ||
-                do_binary_stc_vbr_gen(cpu, mem, reg_no, randgen32->pick_val(0));
-        }
-
-        return failure;
+        return binary_stc_test_wrapper(cpu, mem, randgen32,
+                                       "VBR", &cpu->reg.vbr);
     }
 
     // STC SSR, Rn
     // 0000nnnn00110010
-    static int do_binary_stc_ssr_gen(Sh4 *cpu, Memory *mem, unsigned reg_dst,
-                                     reg32_t ssr_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "STC SSR, R" << reg_dst << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        cpu->reg.ssr = ssr_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(reg_dst) != ssr_val) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "Expected value was " << std::hex << ssr_val <<
-                std::endl;
-            std::cout << "Actual value is " << cpu->reg.ssr << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_stc_ssr_gen(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
-        int failure = 0;
-
-        for (int reg_no = 0; reg_no < 16; reg_no++) {
-            failure = failure ||
-                do_binary_stc_ssr_gen(cpu, mem, reg_no, randgen32->pick_val(0));
-        }
-
-        return failure;
+        return binary_stc_test_wrapper(cpu, mem, randgen32,
+                                       "SSR", &cpu->reg.ssr);
     }
 
     // STC SPC, Rn
     // 0000nnnn01000010
-    static int do_binary_stc_spc_gen(Sh4 *cpu, Memory *mem, unsigned reg_dst,
-                                     reg32_t spc_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "STC SPC, R" << reg_dst << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        cpu->reg.spc = spc_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(reg_dst) != spc_val) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "Expected value was " << std::hex << spc_val <<
-                std::endl;
-            std::cout << "Actual value is " << cpu->reg.spc << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_stc_spc_gen(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
-        int failure = 0;
-
-        for (int reg_no = 0; reg_no < 16; reg_no++) {
-            failure = failure ||
-                do_binary_stc_spc_gen(cpu, mem, reg_no, randgen32->pick_val(0));
-        }
-
-        return failure;
+        return binary_stc_test_wrapper(cpu, mem, randgen32,
+                                       "SPC", &cpu->reg.spc);
     }
 
     // STC SGR, Rn
     // 0000nnnn00111010
-    static int do_binary_stc_sgr_gen(Sh4 *cpu, Memory *mem, unsigned reg_dst,
-                                     reg32_t sgr_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "STC SGR, R" << reg_dst << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        cpu->reg.sgr = sgr_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(reg_dst) != sgr_val) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "Expected value was " << std::hex << sgr_val <<
-                std::endl;
-            std::cout << "Actual value is " << cpu->reg.sgr << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_stc_sgr_gen(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
-        int failure = 0;
-
-        for (int reg_no = 0; reg_no < 16; reg_no++) {
-            failure = failure ||
-                do_binary_stc_sgr_gen(cpu, mem, reg_no, randgen32->pick_val(0));
-        }
-
-        return failure;
+        return binary_stc_test_wrapper(cpu, mem, randgen32,
+                                       "SGR", &cpu->reg.sgr);
     }
 
     // STC DBR, Rn
     // 0000nnnn11111010
-    static int do_binary_stc_dbr_gen(Sh4 *cpu, Memory *mem, unsigned reg_dst,
-                                     reg32_t dbr_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "STC DBR, R" << reg_dst << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        cpu->reg.dbr = dbr_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(reg_dst) != dbr_val) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "Expected value was " << std::hex << dbr_val <<
-                std::endl;
-            std::cout << "Actual value is " << cpu->reg.dbr << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_stc_dbr_gen(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
-        int failure = 0;
-
-        for (int reg_no = 0; reg_no < 16; reg_no++) {
-            failure = failure ||
-                do_binary_stc_dbr_gen(cpu, mem, reg_no, randgen32->pick_val(0));
-        }
-
-        return failure;
+        return binary_stc_test_wrapper(cpu, mem, randgen32,
+                                       "DBR", &cpu->reg.dbr);
     }
 
     // STC.L SR, @-Rn
@@ -4254,45 +3854,15 @@ public:
         return failure;
     }
 
-    // common test infrastructure for LDS unit_tests
-    static int do_binary_lds(Sh4 *cpu, Memory *mem,
-                             std::string src_name, reg32_t *src_ptr,
-                             std::string dst_name, reg32_t *dst_ptr,
-                             reg32_t src_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "LDS " << src_name << ", " << dst_name << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        *src_ptr = src_val;
-        cpu->exec_inst();
-
-        if (*dst_ptr != src_val) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "expected val is " << src_val << std::endl;
-            std::cout << "actual val is " << *dst_ptr << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_lds_test_wrapper(Sh4 *cpu, Memory *mem,
                                        RandGen32 *randgen32,
                                        char const *dst_name, reg32_t *dst) {
         int failure = 0;
         for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
             failure = failure ||
-                do_binary_lds(cpu, mem,
-                              gen_reg_name(reg_no), cpu->gen_reg(reg_no),
-                              dst_name, dst, randgen32->pick_val(0));
+                do_binary_reg_reg(cpu, mem, "LDS",
+                                  gen_reg_name(reg_no), cpu->gen_reg(reg_no),
+                                  dst_name, dst, randgen32->pick_val(0));
         }
         return failure;
     }
