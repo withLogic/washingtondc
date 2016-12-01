@@ -44,27 +44,141 @@ public:
         cpu->reg.sr = Sh4::SR_MD_MASK;
     }
 
-    /*
-     * return a string representing the name of the
-     * given general-purpose register
-     */
-    static std::string gen_reg_name(unsigned reg_no) {
-        std::stringstream ss;
-        ss << "R" << reg_no;
-        return ss.str();
-    }
+    class Operand {
+    public:
+        Operand(Sh4 *cpu_ptr, Memory *mem_ptr) {
+            this->cpu_ptr = cpu_ptr;
+            this->mem_ptr = mem_ptr;
+        }
 
-    // common test infrastructure for LDS unit_tests
+        Sh4 *cpu() {
+            return cpu_ptr;
+        }
+
+        Memory *mem() {
+            return mem_ptr;
+        }
+
+    private:
+        Sh4 *cpu_ptr;
+        Memory *mem_ptr;
+    };
+
+    // An argument that consists of a single general-purpose register
+    class GenRegArg : private Operand {
+    public:
+        GenRegArg(Sh4 *cpu, Memory *mem, unsigned reg_no, reg32_t reg_val) :
+            Operand(cpu, mem){
+            this->reg_no = reg_no;
+            this->initial_val = this->final_val = reg_val;
+        }
+
+        GenRegArg(Sh4 *cpu, Memory *mem, unsigned reg_no,
+                  reg32_t initial_val, reg32_t final_val) : Operand(cpu, mem) {
+            this->reg_no = reg_no;
+            this->initial_val = initial_val;
+            this->final_val = final_val;
+        }
+
+        void initialize() {
+            *(cpu()->gen_reg(reg_no)) = initial_val;
+        }
+
+        bool verify() {
+            if (*(cpu()->gen_reg(reg_no)) == final_val)
+                return true;
+            std::cout << "ERROR ON REGISTER " << txt() << std::endl;
+            std::cout << "EXPECTED VALUE: " << final_val << std::endl;
+            std::cout << "ACTUAL VALUE: " << *(cpu()->gen_reg(reg_no)) <<
+                std::endl;
+            return false;
+        }
+
+        std::string txt() {
+            std::stringstream ss;
+            ss << "R" << reg_no;
+            return ss.str();
+        }
+    private:
+        unsigned reg_no;
+        reg32_t initial_val, final_val;
+    };
+
+    class SpecRegArg : private Operand {
+    public:
+        SpecRegArg(Sh4 *cpu, Memory *mem, char const *name,
+                   reg32_t *ptr, reg32_t reg_val) : Operand(cpu, mem) {
+            this->name = name;
+            this->ptr = ptr;
+            this->initial_val = this->final_val = reg_val;
+        }
+
+        SpecRegArg(Sh4 *cpu, Memory *mem, char const *name,
+                   reg32_t *ptr, reg32_t initial_val, reg32_t final_val) :
+            Operand(cpu, mem) {
+            this->name = name;
+            this->ptr = ptr;
+            this->initial_val = initial_val;
+            this->final_val = final_val;
+        }
+
+        void initialize() {
+            *ptr = initial_val;
+        }
+
+        bool verify() {
+            if (*ptr == final_val)
+                return true;
+            std::cout << "ERROR ON REGISTER " << txt() << std::endl;
+            std::cout << "EXPECTED VALUE: " << std::hex << final_val <<
+                std::endl;
+            std::cout << "ACTUAL VALUE: " << *ptr << std::endl;
+            return false;
+        }
+
+        std::string txt() {
+            return std::string(name);
+        }
+    private:
+        char const *name;
+        reg32_t *ptr;
+        reg32_t initial_val, final_val;
+    };
+
+    class ImmedArg : private Operand {
+    public:
+        ImmedArg(Sh4 *cpu, Memory *mem, uint16_t val) : Operand(cpu, mem) {
+            this->val = val;
+        }
+
+        void initialize() {
+            // do nothing
+        }
+
+        bool verify() {
+            throw InvalidParamError("You can't use an immediate "
+                                    "as a destination");
+        }
+
+        std::string txt() {
+            std::stringstream ss;
+            ss << "#" << val;
+            return ss.str();
+        }
+    private:
+        uint16_t val;
+    };
+
+    // common test infrastructure for binary unit_tests
+    template <class SrcOpClass, class DstOpClass>
     static int do_binary_reg_reg(Sh4 *cpu, Memory *mem,
                                  std::string opcode,
-                                 std::string src_name, reg32_t *src_ptr,
-                                 std::string dst_name, reg32_t *dst_ptr,
-                                 reg32_t src_val) {
+                                 SrcOpClass src_op, DstOpClass dst_op) {
         Sh4Prog test_prog;
         std::stringstream ss;
         std::string cmd;
 
-        ss << opcode << " " << src_name << ", " << dst_name << "\n";
+        ss << opcode << " " << src_op.txt() << ", " << dst_op.txt() << "\n";
         cmd = ss.str();
         test_prog.assemble(cmd);
         const Sh4Prog::InstList& inst = test_prog.get_prog();
@@ -72,13 +186,12 @@ public:
 
         reset_cpu(cpu);
 
-        *src_ptr = src_val;
+        src_op.initialize();
+        dst_op.initialize();
         cpu->exec_inst();
 
-        if (*dst_ptr != src_val) {
+        if (!src_op.verify() || !dst_op.verify()) {
             std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "expected val is " << std::hex << src_val << std::endl;
-            std::cout << "actual val is " << *dst_ptr << std::endl;
             reset_cpu(cpu); // in case SR (or other state register) changed
             return 1;
         }
@@ -947,13 +1060,14 @@ public:
 
         for (unsigned reg_src = 0; reg_src < 16; reg_src++) {
             for (unsigned reg_dst = 0; reg_dst < 16; reg_dst++) {
+                reg32_t src_val = randgen32->pick_val(0);
+                reg32_t dst_val = (reg_src == reg_dst ?
+                                   src_val : randgen32->pick_val(0));
                 failed = failed ||
                     do_binary_reg_reg(cpu, mem, "MOV",
-                                      gen_reg_name(reg_src),
-                                      cpu->gen_reg(reg_src),
-                                      gen_reg_name(reg_dst),
-                                      cpu->gen_reg(reg_dst),
-                                      randgen32->pick_val(0));
+                                      GenRegArg(cpu, mem, reg_src, src_val),
+                                      GenRegArg(cpu, mem, reg_dst,
+                                                dst_val, src_val));
             }
         }
         return failed;
@@ -2848,10 +2962,22 @@ public:
                                        char const *dst_name, reg32_t *dstp) {
         int failure = 0;
         for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
+            reg32_t src_val = randgen32->pick_val(0);
+            reg32_t dst_val = randgen32->pick_val(0);
+
+            if (dstp == &cpu->reg.sr) {
+                // TODO: it may be better not to set *dstp at all in this case
+                dst_val = Sh4::SR_MD_MASK | (cpu->reg.sr & Sh4::SR_RB_MASK);
+                src_val = (src_val & ~Sh4::SR_RB_MASK) |
+                    (cpu->reg.sr & Sh4::SR_RB_MASK);
+            }
+
+            GenRegArg src_reg = GenRegArg(cpu, mem, reg_no, src_val);
+            SpecRegArg dst_reg = SpecRegArg(cpu, mem, dst_name,
+                                            dstp, dst_val, src_val);
             failure = failure ||
-                do_binary_reg_reg(cpu, mem, "LDC", gen_reg_name(reg_no),
-                                  cpu->gen_reg(reg_no), dst_name, dstp,
-                                  randgen32->pick_val(0));
+                do_binary_reg_reg<GenRegArg, SpecRegArg>(
+                    cpu, mem, "LDC", src_reg, dst_reg);
         }
         return failure;
     }
@@ -3270,16 +3396,20 @@ public:
         int failure = 0;
         for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
             reg32_t src_val = randgen32->pick_val(0);
+            reg32_t dst_val = randgen32->pick_val(0);
 
             // don't accidentally disable privileged mode or switch banks
             if (srcp == &cpu->reg.sr) {
                 src_val |= Sh4::SR_MD_MASK;
                 src_val &= ~Sh4::SR_RB_MASK;
             }
+
+            SpecRegArg src_reg = SpecRegArg(cpu, mem, src_name,
+                                            srcp, src_val);
+            GenRegArg dst_reg = GenRegArg(cpu, mem, reg_no, dst_val, src_val);
             failure = failure ||
-                do_binary_reg_reg(cpu, mem, "STC", src_name, srcp,
-                                  gen_reg_name(reg_no), cpu->gen_reg(reg_no),
-                                  src_val);
+                do_binary_reg_reg<SpecRegArg, GenRegArg>(
+                    cpu, mem, "STC", src_reg, dst_reg);
         }
         return failure;
     }
@@ -3856,13 +3986,17 @@ public:
 
     static int binary_lds_test_wrapper(Sh4 *cpu, Memory *mem,
                                        RandGen32 *randgen32,
-                                       char const *dst_name, reg32_t *dst) {
+                                       char const *dst_name, reg32_t *dstp) {
         int failure = 0;
         for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
+            reg32_t src_val = randgen32->pick_val(0);
+            reg32_t dst_val = randgen32->pick_val(0);
+            GenRegArg src_reg = GenRegArg(cpu, mem, reg_no, src_val);
+            SpecRegArg dst_reg = SpecRegArg(cpu, mem, dst_name,
+                                            dstp, dst_val, src_val);
             failure = failure ||
-                do_binary_reg_reg(cpu, mem, "LDS",
-                                  gen_reg_name(reg_no), cpu->gen_reg(reg_no),
-                                  dst_name, dst, randgen32->pick_val(0));
+                do_binary_reg_reg<GenRegArg, SpecRegArg>(
+                    cpu, mem, "LDS", src_reg, dst_reg);
         }
         return failure;
     }
@@ -3893,13 +4027,17 @@ public:
 
     static int binary_sts_test_wrapper(Sh4 *cpu, Memory *mem,
                                        RandGen32 *randgen32,
-                                       char const *src_name, reg32_t *src) {
+                                       char const *src_name, reg32_t *srcp) {
         int failure = 0;
         for (unsigned reg_no = 0; reg_no < 16; reg_no++) {
+            reg32_t src_val = randgen32->pick_val(0);
+            reg32_t dst_val = randgen32->pick_val(0);
+            SpecRegArg src_reg = SpecRegArg(cpu, mem, src_name,
+                                            srcp, src_val);
+            GenRegArg dst_reg = GenRegArg(cpu, mem, reg_no, dst_val, src_val);
             failure = failure ||
-                do_binary_reg_reg(cpu, mem, "STS", src_name, src,
-                                  gen_reg_name(reg_no), cpu->gen_reg(reg_no),
-                                  randgen32->pick_val(0));
+                do_binary_reg_reg<SpecRegArg, GenRegArg>(
+                    cpu, mem, "STS", src_reg, dst_reg);
         }
         return failure;
     }
