@@ -266,49 +266,20 @@ public:
     // ADD Rm, Rn
     // 0111nnnnmmmm1100
     static int add_gen_gen_test(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
-        /*
-         * I don't bother toggling the bank switching flag because if there's a
-         * problem with that, the root-cause will be in Sh4::gen_reg and if the
-         * root-cause is in Sh4::gen_reg then both this function and the opcode
-         * will have the exact same bug, an it will be hidden.
-         */
+        int failure = 0;
         for (int reg1_no = 0; reg1_no <= 15; reg1_no++) {
             for (int reg2_no = 0; reg2_no <= 15; reg2_no++) {
-                Sh4Prog test_prog;
-                std::stringstream ss;
-                reg32_t initial_val1 = randgen32->pick_val(0);
-                reg32_t initial_val2;
-
-                if (reg1_no == reg2_no)
-                    initial_val2 = initial_val1;
-                else
-                    initial_val2 = randgen32->pick_val(0);
-
-                ss << "ADD R" << reg1_no << ", R" << reg2_no << "\n";
-                test_prog.assemble(ss.str());
-                const Sh4Prog::InstList& inst = test_prog.get_prog();
-                mem->load_program(0, inst.begin(), inst.end());
-
-                reset_cpu(cpu);
-
-                *cpu->gen_reg(reg1_no) = initial_val1;
-                *cpu->gen_reg(reg2_no) = initial_val2;
-                cpu->exec_inst();
-
-                reg32_t expected_val = (initial_val1 + initial_val2);
-                reg32_t actual_val = *cpu->gen_reg(reg2_no);
-
-                if (actual_val != expected_val) {
-                    std::cout << "ERROR running: " << std::endl
-                              << "\t" << ss.str();
-                    std::cout << "Expected " << std::hex <<
-                        (initial_val1 + initial_val2) << " but got " <<
-                        actual_val << std::endl;
-                    return 1;
-                }
+                reg32_t src_val = randgen32->pick_val(0);
+                reg32_t dst_val = (reg1_no == reg2_no ? src_val :
+                                   randgen32->pick_val(0));
+                GenRegArg src(cpu, mem, reg1_no, src_val,
+                              src_val == dst_val ? src_val + dst_val : src_val);
+                GenRegArg dst(cpu, mem, reg2_no, dst_val, src_val + dst_val);
+                failure = failure || do_binary_reg_reg(cpu, mem, "ADD",
+                                                       src, dst);
             }
         }
-        return 0;
+        return failure;
     }
 
     // ADDC Rm, Rn
@@ -564,55 +535,20 @@ public:
     // SUB Rm, Rn
     // 0011nnnnmmmm1000
     static int sub_gen_gen_test(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
-        /*
-         * I don't bother toggling the bank switching flag because if there's a
-         * problem with that, the root-cause will be in Sh4::gen_reg and if the
-         * root-cause is in Sh4::gen_reg then both this function and the opcode
-         * will have the exact same bug, an it will be hidden.
-         */
+        int failure = 0;
         for (int reg1_no = 0; reg1_no <= 15; reg1_no++) {
             for (int reg2_no = 0; reg2_no <= 15; reg2_no++) {
-                Sh4Prog test_prog;
-                std::stringstream ss;
-                reg32_t initial_val1 = randgen32->pick_val(0);
-                reg32_t initial_val2;
-
-                if (reg1_no == reg2_no)
-                    initial_val2 = initial_val1;
-                else
-                    initial_val2 = randgen32->pick_val(0);
-
-                ss << "SUB R" << reg1_no << ", R" << reg2_no << "\n";
-                test_prog.assemble(ss.str());
-                const Sh4Prog::InstList& inst = test_prog.get_prog();
-                mem->load_program(0, inst.begin(), inst.end());
-
-                reset_cpu(cpu);
-
-                *cpu->gen_reg(reg1_no) = initial_val1;
-                *cpu->gen_reg(reg2_no) = initial_val2;
-                cpu->exec_inst();
-
-                reg32_t expected_val = initial_val2 - initial_val1;
-                reg32_t actual_val = *cpu->gen_reg(reg2_no);
-
-                if (actual_val != expected_val) {
-                    std::cout << "ERROR running: " << std::endl
-                              << "\t" << ss.str();
-                    std::cout << "Expected " << std::hex <<
-                        (initial_val2 - initial_val1) << " but got " <<
-                        actual_val << std::endl;
-                    std::cout << "initial value of R" << std::dec <<
-                        reg2_no << ": " << std::hex << initial_val2 <<
-                        std::endl;
-                    std::cout << "initial value of R" << std::dec <<
-                        reg1_no << ": " << std::hex << initial_val1 <<
-                        std::endl;
-                    return 1;
-                }
+                reg32_t src_val = randgen32->pick_val(0);
+                reg32_t dst_val = (reg1_no == reg2_no ? src_val :
+                                   randgen32->pick_val(0));
+                GenRegArg src(cpu, mem, reg1_no, src_val,
+                              src_val == dst_val ? dst_val - src_val : src_val);
+                GenRegArg dst(cpu, mem, reg2_no, dst_val, dst_val - src_val);
+                failure = failure || do_binary_reg_reg(cpu, mem, "SUB",
+                                                       src, dst);
             }
         }
-        return 0;
+        return failure;
     }
 
     // SUBC Rm, Rn
@@ -5128,54 +5064,20 @@ public:
 
     // AND Rm, Rn
     // 0010nnnnmmmm1001
-    static int do_binary_and_gen_gen(Sh4 *cpu, Memory *mem, unsigned reg_src,
-                                     unsigned reg_dst, uint32_t src_val,
-                                     uint32_t dst_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "AND R" << reg_src << ", R" << reg_dst << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-        *cpu->gen_reg(reg_src) = src_val;
-        *cpu->gen_reg(reg_dst) = dst_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(reg_dst) != (src_val & dst_val)) {
-            std::cout << "While running: " << cmd << std::endl;
-            std::cout << "src_val is " << std::hex << src_val << std::endl;
-            std::cout << "dst_val is " << std::hex << dst_val << std::endl;
-            std::cout << "expected val is " << (src_val & dst_val) << std::endl;
-            std::cout << "actual val is " << std::hex <<
-                *cpu->gen_reg(reg_dst) << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_and_gen_gen(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
         int failure = 0;
-
-        for (unsigned reg_src = 0; reg_src < 16; reg_src++) {
-            for (unsigned reg_dst = 0; reg_dst < 16; reg_dst++) {
-                uint32_t src_val = randgen32->pick_val(0);
-                uint32_t dst_val = src_val;
-                if (reg_src != reg_dst) {
-                    dst_val = randgen32->pick_val(0);
-                }
-
-                failure = failure ||
-                    do_binary_and_gen_gen(cpu, mem, reg_src, reg_dst,
-                                          src_val, dst_val);
+        for (int reg1_no = 0; reg1_no <= 15; reg1_no++) {
+            for (int reg2_no = 0; reg2_no <= 15; reg2_no++) {
+                reg32_t src_val = randgen32->pick_val(0);
+                reg32_t dst_val = (reg1_no == reg2_no ? src_val :
+                                   randgen32->pick_val(0));
+                GenRegArg src(cpu, mem, reg1_no, src_val,
+                              src_val == dst_val ? src_val & dst_val : src_val);
+                GenRegArg dst(cpu, mem, reg2_no, dst_val, src_val & dst_val);
+                failure = failure || do_binary_reg_reg(cpu, mem, "AND",
+                                                       src, dst);
             }
         }
-
         return failure;
     }
 
@@ -5281,54 +5183,20 @@ public:
 
     // OR Rm, Rn
     // 0010nnnnmmmm1011
-    static int do_binary_or_gen_gen(Sh4 *cpu, Memory *mem, unsigned reg_src,
-                                    unsigned reg_dst, uint32_t src_val,
-                                    uint32_t dst_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "OR R" << reg_src << ", R" << reg_dst << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-        *cpu->gen_reg(reg_src) = src_val;
-        *cpu->gen_reg(reg_dst) = dst_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(reg_dst) != (src_val | dst_val)) {
-            std::cout << "While running: " << cmd << std::endl;
-            std::cout << "src_val is " << std::hex << src_val << std::endl;
-            std::cout << "dst_val is " << std::hex << dst_val << std::endl;
-            std::cout << "expected val is " << (src_val | dst_val) << std::endl;
-            std::cout << "actual val is " << std::hex <<
-                *cpu->gen_reg(reg_dst) << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_or_gen_gen(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
         int failure = 0;
-
-        for (unsigned reg_src = 0; reg_src < 16; reg_src++) {
-            for (unsigned reg_dst = 0; reg_dst < 16; reg_dst++) {
-                uint32_t src_val = randgen32->pick_val(0);
-                uint32_t dst_val = src_val;
-                if (reg_src != reg_dst) {
-                    dst_val = randgen32->pick_val(0);
-                }
-
-                failure = failure ||
-                    do_binary_or_gen_gen(cpu, mem, reg_src, reg_dst,
-                                          src_val, dst_val);
+        for (int reg1_no = 0; reg1_no <= 15; reg1_no++) {
+            for (int reg2_no = 0; reg2_no <= 15; reg2_no++) {
+                reg32_t src_val = randgen32->pick_val(0);
+                reg32_t dst_val = (reg1_no == reg2_no ? src_val :
+                                   randgen32->pick_val(0));
+                GenRegArg src(cpu, mem, reg1_no, src_val,
+                              src_val == dst_val ? src_val | dst_val : src_val);
+                GenRegArg dst(cpu, mem, reg2_no, dst_val, src_val | dst_val);
+                failure = failure || do_binary_reg_reg(cpu, mem, "OR",
+                                                       src, dst);
             }
         }
-
         return failure;
     }
 
@@ -5434,54 +5302,20 @@ public:
 
     // XOR Rm, Rn
     // 0010nnnnmmmm1010
-    static int do_binary_xor_gen_gen(Sh4 *cpu, Memory *mem, unsigned reg_src,
-                                    unsigned reg_dst, uint32_t src_val,
-                                    uint32_t dst_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "XOR R" << reg_src << ", R" << reg_dst << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-        *cpu->gen_reg(reg_src) = src_val;
-        *cpu->gen_reg(reg_dst) = dst_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(reg_dst) != (src_val ^ dst_val)) {
-            std::cout << "While running: " << cmd << std::endl;
-            std::cout << "src_val is " << std::hex << src_val << std::endl;
-            std::cout << "dst_val is " << std::hex << dst_val << std::endl;
-            std::cout << "expected val is " << (src_val ^ dst_val) << std::endl;
-            std::cout << "actual val is " << std::hex <<
-                *cpu->gen_reg(reg_dst) << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_xor_gen_gen(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
         int failure = 0;
-
-        for (unsigned reg_src = 0; reg_src < 16; reg_src++) {
-            for (unsigned reg_dst = 0; reg_dst < 16; reg_dst++) {
-                uint32_t src_val = randgen32->pick_val(0);
-                uint32_t dst_val = src_val;
-                if (reg_src != reg_dst) {
-                    dst_val = randgen32->pick_val(0);
-                }
-
-                failure = failure ||
-                    do_binary_xor_gen_gen(cpu, mem, reg_src, reg_dst,
-                                          src_val, dst_val);
+        for (int reg1_no = 0; reg1_no <= 15; reg1_no++) {
+            for (int reg2_no = 0; reg2_no <= 15; reg2_no++) {
+                reg32_t src_val = randgen32->pick_val(0);
+                reg32_t dst_val = (reg1_no == reg2_no ? src_val :
+                                   randgen32->pick_val(0));
+                GenRegArg src(cpu, mem, reg1_no, src_val,
+                              src_val == dst_val ? src_val ^ dst_val : src_val);
+                GenRegArg dst(cpu, mem, reg2_no, dst_val, src_val ^ dst_val);
+                failure = failure || do_binary_reg_reg(cpu, mem, "XOR",
+                                                       src, dst);
             }
         }
-
         return failure;
     }
 
@@ -5587,46 +5421,20 @@ public:
 
     // NOT Rm, Rn
     // 0110nnnnmmmm0111
-    static int do_binary_not_gen_gen(Sh4 *cpu, Memory *mem, unsigned reg_src,
-                                    unsigned reg_dst, uint32_t src_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "NOT R" << reg_src << ", R" << reg_dst << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-        *cpu->gen_reg(reg_src) = src_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(reg_dst) != ~src_val) {
-            std::cout << "While running: " << cmd << std::endl;
-            std::cout << "src_val is " << std::hex << src_val << std::endl;
-            std::cout << "expected val is " << (~src_val) << std::endl;
-            std::cout << "actual val is " << std::hex <<
-                *cpu->gen_reg(reg_dst) << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_not_gen_gen(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
         int failure = 0;
-
-        for (unsigned reg_src = 0; reg_src < 16; reg_src++) {
-            for (unsigned reg_dst = 0; reg_dst < 16; reg_dst++) {
-                uint32_t src_val = randgen32->pick_val(0);
-
-                failure = failure ||
-                    do_binary_not_gen_gen(cpu, mem, reg_src, reg_dst, src_val);
+        for (int reg1_no = 0; reg1_no <= 15; reg1_no++) {
+            for (int reg2_no = 0; reg2_no <= 15; reg2_no++) {
+                reg32_t src_val = randgen32->pick_val(0);
+                reg32_t dst_val = (reg1_no == reg2_no ? src_val :
+                                   randgen32->pick_val(0));
+                GenRegArg src(cpu, mem, reg1_no, src_val,
+                              src_val == dst_val ? ~src_val : src_val);
+                GenRegArg dst(cpu, mem, reg2_no, dst_val, ~src_val);
+                failure = failure || do_binary_reg_reg(cpu, mem, "NOT",
+                                                       src, dst);
             }
         }
-
         return failure;
     }
 };
