@@ -165,8 +165,7 @@ public:
         }
 
         bool verify() {
-            throw InvalidParamError("You can't use an immediate "
-                                    "as a destination");
+            return true;
         }
 
         std::string txt() {
@@ -227,40 +226,18 @@ public:
     // 0111nnnniiiiiiii
     static int add_immed_test(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
         reg32_t initial_val = randgen32->pick_val(0);
-        /*
-         * I don't bother toggling the bank switching flag because if there's a
-         * problem with that, the root-cause will be in Sh4::gen_reg and if the
-         * root-cause is in Sh4::gen_reg then both this function and the opcode
-         * will have the exact same bug, an it will be hidden.
-         */
+        int failure = 0;
         for (int reg_no = 0; reg_no <= 15; reg_no++) {
-            for (int imm_val = 0; imm_val <= 0xff; imm_val++) {
-                Sh4Prog test_prog;
-                std::stringstream ss;
-                ss << "ADD #" << imm_val << ", R" << reg_no << "\n";
-                test_prog.assemble(ss.str());
-                const Sh4Prog::InstList& inst = test_prog.get_prog();
-                mem->load_program(0, inst.begin(), inst.end());
-
-                reset_cpu(cpu);
-
-                *cpu->gen_reg(reg_no) = initial_val;
-                cpu->exec_inst();
-
-                reg32_t expected_val = (initial_val + int32_t(int8_t(imm_val)));
-                reg32_t actual_val = *cpu->gen_reg(reg_no);
-
-                if (actual_val != expected_val) {
-                    std::cout << "ERROR running: " << std::endl <<
-                        "\t" << ss.str() << std::endl;
-                    std::cout << "Expected " << std::hex <<
-                        (initial_val + imm_val) << " but got " <<
-                        actual_val << std::endl;
-                    return 1;
-                }
+            for (unsigned imm_val = 0; imm_val <= 0xff; imm_val++) {
+                uint32_t dst_val = randgen32->pick_val(0);
+                ImmedArg src_op(cpu, mem, imm_val);
+                GenRegArg dst_op(cpu, mem, reg_no, dst_val,
+                                 int32_t(dst_val) + int32_t(int8_t(imm_val)));
+                failure = failure ||
+                    do_binary_reg_reg(cpu, mem, "ADD", src_op, dst_op);
             }
         }
-        return 0;
+        return failure;
     }
 
     // ADD Rm, Rn
@@ -845,31 +822,20 @@ public:
     // 1110nnnniiiiiiii
     static int mov_binary_imm_gen_test(Sh4 *cpu, Memory *mem,
                                        RandGen32 *randgen32) {
+        int failure = 0;
         for (int reg_no = 0; reg_no < 16; reg_no++) {
-            for (uint8_t imm_val = 0;
-                 imm_val < std::numeric_limits<uint8_t>::max();
-                 imm_val++) {
-                Sh4Prog test_prog;
-                std::stringstream ss;
-
-                // the reason for the cast to unsigned below is that the
-                // operator<< overload can't tell the difference between a char
-                // and an 8-bit integer
-                ss << "MOV #" << (unsigned)imm_val << ", R" << reg_no << "\n";
-                test_prog.assemble(ss.str());
-                const Sh4Prog::InstList& inst = test_prog.get_prog();
-                mem->load_program(0, inst.begin(), inst.end());
-
-                reset_cpu(cpu);
-
-                cpu->exec_inst();
-
-                if (*cpu->gen_reg(reg_no) != int32_t(int8_t(imm_val)))
-                    return 1;
+            reg32_t initial_val = randgen32->pick_val(0);
+            for (unsigned imm_val = 0; imm_val <= 0xff; imm_val++) {
+                uint32_t dst_val = randgen32->pick_val(0);
+                ImmedArg src_op(cpu, mem, imm_val);
+                GenRegArg dst_op(cpu, mem, reg_no, dst_val,
+                                 int32_t(int8_t(imm_val)));
+                failure = failure ||
+                    do_binary_reg_reg(cpu, mem, "MOV", src_op, dst_op);
             }
         }
 
-        return 0;
+        return failure;
     }
 
     // MOV.W @(disp, PC), Rn
@@ -5083,42 +5049,17 @@ public:
 
     // AND #imm, R0
     // 11001001iiiiiiii
-    static int do_binary_and_imm_r0(Sh4 *cpu, Memory  *mem,
-                                    uint8_t imm_val, uint32_t r0_val) {
-
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "AND #" << unsigned(imm_val) << ", R0\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-        *cpu->gen_reg(0) = r0_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(0) != (r0_val & imm_val)) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "output val is " << (r0_val & imm_val) << std::endl;
-            std::cout << "expected val is " << (r0_val & imm_val) << std::endl;
-            std::cout << "r0_val is " << r0_val << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_and_imm_r0(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
+        reg32_t initial_val = randgen32->pick_val(0);
         int failure = 0;
-
-        for (unsigned imm_val = 0; imm_val < 256; imm_val++) {
-            failure =  failure ||
-                do_binary_and_imm_r0(cpu, mem, imm_val, randgen32->pick_val(0));
+        for (unsigned imm_val = 0; imm_val <= 0xff; imm_val++) {
+            uint32_t dst_val = randgen32->pick_val(0);
+            ImmedArg src_op(cpu, mem, imm_val);
+            GenRegArg dst_op(cpu, mem, 0, dst_val,
+                             dst_val & uint32_t(imm_val));
+            failure = failure ||
+                do_binary_reg_reg(cpu, mem, "AND", src_op, dst_op);
         }
-
         return failure;
     }
 
@@ -5202,42 +5143,17 @@ public:
 
     // OR #imm, R0
     // 11001011iiiiiiii
-    static int do_binary_or_imm_r0(Sh4 *cpu, Memory  *mem,
-                                    uint8_t imm_val, uint32_t r0_val) {
-
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "OR #" << unsigned(imm_val) << ", R0\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-        *cpu->gen_reg(0) = r0_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(0) != (r0_val | imm_val)) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "output val is " << (r0_val & imm_val) << std::endl;
-            std::cout << "expected val is " << (r0_val | imm_val) << std::endl;
-            std::cout << "r0_val is " << r0_val << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_or_imm_r0(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
+        reg32_t initial_val = randgen32->pick_val(0);
         int failure = 0;
-
-        for (unsigned imm_val = 0; imm_val < 256; imm_val++) {
-            failure =  failure ||
-                do_binary_or_imm_r0(cpu, mem, imm_val, randgen32->pick_val(0));
+        for (unsigned imm_val = 0; imm_val <= 0xff; imm_val++) {
+            uint32_t dst_val = randgen32->pick_val(0);
+            ImmedArg src_op(cpu, mem, imm_val);
+            GenRegArg dst_op(cpu, mem, 0, dst_val,
+                             dst_val | uint32_t(imm_val));
+            failure = failure ||
+                do_binary_reg_reg(cpu, mem, "OR", src_op, dst_op);
         }
-
         return failure;
     }
 
@@ -5321,42 +5237,17 @@ public:
 
     // XOR #imm, R0
     // 11001010iiiiiiii
-    static int do_binary_xor_imm_r0(Sh4 *cpu, Memory  *mem,
-                                    uint8_t imm_val, uint32_t r0_val) {
-
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "XOR #" << unsigned(imm_val) << ", R0\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-        *cpu->gen_reg(0) = r0_val;
-        cpu->exec_inst();
-
-        if (*cpu->gen_reg(0) != (r0_val ^ imm_val)) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "output val is " << (r0_val & imm_val) << std::endl;
-            std::cout << "expected val is " << (r0_val ^ imm_val) << std::endl;
-            std::cout << "r0_val is " << r0_val << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_xor_imm_r0(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
+        reg32_t initial_val = randgen32->pick_val(0);
         int failure = 0;
-
-        for (unsigned imm_val = 0; imm_val < 256; imm_val++) {
-            failure =  failure ||
-                do_binary_xor_imm_r0(cpu, mem, imm_val, randgen32->pick_val(0));
+        for (unsigned imm_val = 0; imm_val <= 0xff; imm_val++) {
+            uint32_t dst_val = randgen32->pick_val(0);
+            ImmedArg src_op(cpu, mem, imm_val);
+            GenRegArg dst_op(cpu, mem, 0, dst_val,
+                             dst_val ^ uint32_t(imm_val));
+            failure = failure ||
+                do_binary_reg_reg(cpu, mem, "XOR", src_op, dst_op);
         }
-
         return failure;
     }
 
