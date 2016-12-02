@@ -127,6 +127,9 @@ struct Sh4::InstOpcode Sh4::opcode_list[] = {
     // AND.B #imm, @(R0, GBR)
     { "11001101iiiiiiii", &Sh4::inst_binary_andb_imm_r0_gbr },
 
+    // AND #imm, R0
+    { "11001001iiiiiiii", &Sh4::inst_binary_and_imm_r0 },
+
     // OR.B #imm, @(R0, GBR)
     { "11001111iiiiiiii", &Sh4::inst_binary_orb_imm_r0_gbr },
 
@@ -870,13 +873,19 @@ void Sh4::inst_unary_movt_gen(OpArgs inst) {
 // CMP/PZ Rn
 // 0100nnnn00010001
 void Sh4::inst_unary_cmppz_gen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    reg.sr &= ~SR_FLAG_T_MASK;
+    uint32_t flag = (*gen_reg(inst.gen_reg)) >= 0;
+
+    reg.sr |= flag << SR_FLAG_T_SHIFT;
 }
 
 // CMP/PL Rn
 // 0100nnnn00010101
 void Sh4::inst_unary_cmppl_gen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    reg.sr &= ~SR_FLAG_T_MASK;
+    uint32_t flag = (*gen_reg(inst.gen_reg)) > 0;
+
+    reg.sr |= flag << SR_FLAG_T_SHIFT;
 }
 
 // DT Rn
@@ -984,49 +993,94 @@ void Sh4::inst_unary_bsrf_gen(OpArgs inst) {
 // CMP/EQ #imm, R0
 // 10001000iiiiiiii
 void Sh4::inst_binary_cmpeq_imm_r0(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    reg.sr &= ~SR_FLAG_T_MASK;
+    reg.sr |= ((*gen_reg(0) == inst.imm8) << SR_FLAG_T_SHIFT);
 }
 
 // AND.B #imm, @(R0, GBR)
 // 11001101iiiiiiii
 void Sh4::inst_binary_andb_imm_r0_gbr(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    addr32_t addr = *gen_reg(0) + reg.gbr;
+    uint8_t val;
+
+    if (read_mem(&val, addr, sizeof(val)) != 0)
+        return;
+
+    val &= inst.imm8;
+
+    if (write_mem(&val, addr, sizeof(val)) != 0)
+        return;
+}
+
+// AND #imm, R0
+// 11001001iiiiiiii
+void Sh4::inst_binary_and_imm_r0(OpArgs inst) {
+    *gen_reg(0) &= inst.imm8;
 }
 
 // OR.B #imm, @(R0, GBR)
 // 11001111iiiiiiii
 void Sh4::inst_binary_orb_imm_r0_gbr(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    addr32_t addr = *gen_reg(0) + reg.gbr;
+    uint8_t val;
+
+    if (read_mem(&val, addr, sizeof(val)) != 0)
+        return;
+
+    val |= inst.imm8;
+
+    if (write_mem(&val, addr, sizeof(val)) != 0)
+        return;
 }
 
 // OR #imm, R0
 // 11001011iiiiiiii
 void Sh4::inst_binary_or_imm_r0(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    *gen_reg(0) |= inst.imm8;
 }
 
 // TST #imm, R0
 // 11001000iiiiiiii
 void Sh4::inst_binary_tst_imm_r0(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    reg.sr &= ~SR_FLAG_T_MASK;
+    reg32_t flag = !(inst.imm8 & *gen_reg(0)) <<
+        SR_FLAG_T_SHIFT;
+    reg.sr |= flag;
 }
 
 // TST.B #imm, @(R0, GBR)
 // 11001100iiiiiiii
 void Sh4::inst_binary_tstb_imm_r0_gbr(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    addr32_t addr = *gen_reg(0) + reg.gbr;
+    uint8_t val;
+
+    read_mem(&val, addr, sizeof(val));
+
+    reg.sr &= ~SR_FLAG_T_MASK;
+    reg32_t flag = !(inst.imm8 & val) <<
+        SR_FLAG_T_SHIFT;
+    reg.sr |= flag;
 }
 
 // XOR #imm, R0
 // 11001010iiiiiiii
 void Sh4::inst_binary_xor_imm_r0(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    *gen_reg(0) ^= inst.imm8;
 }
 
 // XOR.B #imm, @(R0, GBR)
 // 11001110iiiiiiii
 void Sh4::inst_binary_xorb_imm_r0_gbr(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    addr32_t addr = *gen_reg(0) + reg.gbr;
+    uint8_t val;
+
+    if (read_mem(&val, addr, sizeof(val)) != 0)
+        return;
+
+    val ^= inst.imm8;
+
+    if (write_mem(&val, addr, sizeof(val)) != 0)
+        return;
 }
 
 // BF label
@@ -1074,7 +1128,16 @@ void Sh4::inst_unary_trapa_disp(OpArgs inst) {
 // TAS.B @Rn
 // 0100nnnn00011011
 void Sh4::inst_unary_tasb_gen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    addr32_t addr = *gen_reg(inst.gen_reg);
+    uint8_t val;
+    reg32_t mask;
+
+    read_mem(&val, addr, sizeof(val));
+    reg.sr &= ~SR_FLAG_T_MASK;
+    mask = (!val) << SR_FLAG_T_SHIFT;
+    reg.sr |= mask;
+    val |= 0x80;
+    write_mem(&val, addr, sizeof(val));
 }
 
 // OCBI @Rn
@@ -1601,37 +1664,61 @@ void Sh4::inst_binary_addv_gen_gen(OpArgs inst) {
 // CMP/EQ Rm, Rn
 // 0011nnnnmmmm0000
 void Sh4::inst_binary_cmpeq_gen_gen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    reg.sr &= ~SR_FLAG_T_MASK;
+    reg.sr |= ((*gen_reg(inst.src_reg) == *gen_reg(inst.dst_reg)) <<
+               SR_FLAG_T_SHIFT);
 }
 
 // CMP/HS Rm, Rn
 // 0011nnnnmmmm0010
 void Sh4::inst_binary_cmphs_gen_gen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    reg.sr &= ~SR_FLAG_T_MASK;
+    uint32_t lhs = *gen_reg(inst.dst_reg);
+    uint32_t rhs = *gen_reg(inst.src_reg);
+    reg.sr |= ((lhs >= rhs) << SR_FLAG_T_SHIFT);
 }
 
 // CMP/GE Rm, Rn
 // 0011nnnnmmmm0011
 void Sh4::inst_binary_cmpge_gen_gen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    reg.sr &= ~SR_FLAG_T_MASK;
+    int32_t lhs = *gen_reg(inst.dst_reg);
+    int32_t rhs = *gen_reg(inst.src_reg);
+    reg.sr |= ((lhs >= rhs) << SR_FLAG_T_SHIFT);
 }
 
 // CMP/HI Rm, Rn
 // 0011nnnnmmmm0110
 void Sh4::inst_binary_cmphi_gen_gen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    reg.sr &= ~SR_FLAG_T_MASK;
+    uint32_t lhs = *gen_reg(inst.dst_reg);
+    uint32_t rhs = *gen_reg(inst.src_reg);
+    reg.sr |= ((lhs > rhs) << SR_FLAG_T_SHIFT);
 }
 
 // CMP/GT Rm, Rn
 // 0011nnnnmmmm0111
 void Sh4::inst_binary_cmpgt_gen_gen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    reg.sr &= ~SR_FLAG_T_MASK;
+    int32_t lhs = *gen_reg(inst.dst_reg);
+    int32_t rhs = *gen_reg(inst.src_reg);
+    reg.sr |= ((lhs > rhs) << SR_FLAG_T_SHIFT);
 }
 
 // CMP/STR Rm, Rn
 // 0010nnnnmmmm1100
 void Sh4::inst_binary_cmpstr_gen_gen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    uint32_t lhs = *gen_reg(inst.dst_reg);
+    uint32_t rhs = *gen_reg(inst.src_reg);
+    uint32_t flag;
+
+    flag = !!(((lhs & 0x000000ff) == (rhs & 0x000000ff)) ||
+              ((lhs & 0x0000ff00) == (rhs & 0x0000ff00)) ||
+              ((lhs & 0x00ff0000) == (rhs & 0x00ff0000)) ||
+              ((lhs & 0xff000000) == (rhs & 0xff000000)));
+
+    reg.sr &= ~SR_FLAG_T_MASK;
+    reg.sr |= flag << SR_FLAG_T_SHIFT;
 }
 
 // DIV1 Rm, Rn
@@ -1771,31 +1858,34 @@ void Sh4::inst_binary_subv_gen_gen(OpArgs inst) {
 // AND Rm, Rn
 // 0010nnnnmmmm1001
 void Sh4::inst_binary_and_gen_gen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    *gen_reg(inst.dst_reg) &= *gen_reg(inst.src_reg);
 }
 
 // NOT Rm, Rn
 // 0110nnnnmmmm0111
 void Sh4::inst_binary_not_gen_gen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    *gen_reg(inst.dst_reg) = ~(*gen_reg(inst.src_reg));
 }
 
 // OR Rm, Rn
 // 0010nnnnmmmm1011
 void Sh4::inst_binary_or_gen_gen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    *gen_reg(inst.dst_reg) |= *gen_reg(inst.src_reg);
 }
 
 // TST Rm, Rn
 // 0010nnnnmmmm1000
 void Sh4::inst_binary_tst_gen_gen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    reg.sr &= ~SR_FLAG_T_MASK;
+    reg32_t flag = !(*gen_reg(inst.src_reg) & *gen_reg(inst.dst_reg)) <<
+        SR_FLAG_T_MASK;
+    reg.sr |= flag;
 }
 
 // XOR Rm, Rn
 // 0010nnnnmmmm1010
 void Sh4::inst_binary_xor_gen_gen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    *gen_reg(inst.dst_reg) ^= *gen_reg(inst.src_reg);
 }
 
 // SHAD Rm, Rn
@@ -1913,37 +2003,79 @@ void Sh4::inst_binary_sts_pr_gen(OpArgs inst) {
 // LDS.L @Rm+, MACH
 // 0100mmmm00000110
 void Sh4::inst_binary_ldsl_indgeninc_mach(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    uint32_t val;
+    reg32_t *addr_reg = gen_reg(inst.gen_reg);
+
+    if (read_mem(&val, *addr_reg, sizeof(val)) != 0)
+        return;
+
+    reg.mach = val;
+
+    *addr_reg += 4;
 }
 
 // LDS.L @Rm+, MACL
 // 0100mmmm00010110
 void Sh4::inst_binary_ldsl_indgeninc_macl(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    uint32_t val;
+    reg32_t *addr_reg = gen_reg(inst.gen_reg);
+
+    if (read_mem(&val, *addr_reg, sizeof(val)) != 0)
+        return;
+
+    reg.macl = val;
+
+    *addr_reg += 4;
 }
 
 // STS.L MACH, @-Rn
 // 0100mmmm00000010
 void Sh4::inst_binary_stsl_mach_inddecgen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    reg32_t *addr_reg = gen_reg(inst.gen_reg);
+    addr32_t addr = *addr_reg - 4;
+
+    if (write_mem(&reg.mach, addr, sizeof(reg.mach)) != 0)
+        return;
+
+    *addr_reg = addr;
 }
 
 // STS.L MACL, @-Rn
 // 0100mmmm00010010
 void Sh4::inst_binary_stsl_macl_inddecgen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    reg32_t *addr_reg = gen_reg(inst.gen_reg);
+    addr32_t addr = *addr_reg - 4;
+
+    if (write_mem(&reg.macl, addr, sizeof(reg.macl)) != 0)
+        return;
+
+    *addr_reg = addr;
 }
 
 // LDS.L @Rm+, PR
 // 0100mmmm00100110
 void Sh4::inst_binary_ldsl_indgeninc_pr(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    uint32_t val;
+    reg32_t *addr_reg = gen_reg(inst.gen_reg);
+
+    if (read_mem(&val, *addr_reg, sizeof(val)) != 0)
+        return;
+
+    reg.pr = val;
+
+    *addr_reg += 4;
 }
 
 // STS.L PR, @-Rn
 // 0100nnnn00100010
 void Sh4::inst_binary_stsl_pr_inddecgen(OpArgs inst) {
-    throw UnimplementedError("Instruction handler");
+    reg32_t *addr_reg = gen_reg(inst.gen_reg);
+    addr32_t addr = *addr_reg - 4;
+
+    if (write_mem(&reg.pr, addr, sizeof(reg.pr)) != 0)
+        return;
+
+    *addr_reg = addr;
 }
 
 // MOV.B Rm, @Rn
