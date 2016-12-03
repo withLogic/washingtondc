@@ -97,7 +97,8 @@ public:
             if (*(cpu()->gen_reg(reg_no)) == final_val)
                 return true;
             std::cout << "ERROR ON REGISTER " << txt() << std::endl;
-            std::cout << "EXPECTED VALUE: " << final_val << std::endl;
+            std::cout << "EXPECTED VALUE: " << std::hex << final_val <<
+                std::endl;
             std::cout << "ACTUAL VALUE: " << *(cpu()->gen_reg(reg_no)) <<
                 std::endl;
             return false;
@@ -177,11 +178,37 @@ public:
         uint16_t val;
     };
 
+    class DefValidationFunc {
+    public:
+        bool operator()(Sh4 *cpu, Memory *mem) const {
+            return true;
+        }
+    };
+
+    class ValidateFlagT {
+    public:
+        ValidateFlagT(bool expect) {
+            this->expect = expect;
+        }
+        bool operator()(Sh4 *cpu, Memory *mem) const {
+            bool tval = bool(!!(cpu->reg.sr & Sh4::SR_FLAG_T_MASK));
+            bool res = tval == expect;
+
+            if (!res)
+                std::cout << "ERROR: T flag does not match (expected T=" <<
+                    expect << ", got T=" << tval << ")" << std::endl;
+            return res;
+        }
+    private:
+        bool expect;
+    };
+
     // common test infrastructure for binary unit_tests
-    template <class SrcOpClass, class DstOpClass>
+    template <class SrcOpClass, class DstOpClass, class Validator>
     static int do_binary_reg_reg(Sh4 *cpu, Memory *mem,
                                  std::string opcode,
-                                 SrcOpClass src_op, DstOpClass dst_op) {
+                                 SrcOpClass src_op, DstOpClass dst_op,
+                                 Validator validate) {
         Sh4Prog test_prog;
         std::stringstream ss;
         std::string cmd;
@@ -198,7 +225,7 @@ public:
         dst_op.initialize();
         cpu->exec_inst();
 
-        if (!src_op.verify() || !dst_op.verify()) {
+        if (!src_op.verify() || !dst_op.verify() || !validate(cpu, mem)) {
             std::cout << "ERROR while running " << cmd << std::endl;
             reset_cpu(cpu); // in case SR (or other state register) changed
             return 1;
@@ -234,7 +261,8 @@ public:
                 GenRegArg dst_op(cpu, mem, reg_no, dst_val,
                                  int32_t(dst_val) + int32_t(int8_t(imm_val)));
                 failure = failure ||
-                    do_binary_reg_reg(cpu, mem, "ADD", src_op, dst_op);
+                    do_binary_reg_reg(cpu, mem, "ADD", src_op, dst_op,
+                                      DefValidationFunc());
             }
         }
         return failure;
@@ -253,7 +281,8 @@ public:
                               src_val == dst_val ? src_val + dst_val : src_val);
                 GenRegArg dst(cpu, mem, reg2_no, dst_val, src_val + dst_val);
                 failure = failure || do_binary_reg_reg(cpu, mem, "ADD",
-                                                       src, dst);
+                                                       src, dst,
+                                                       DefValidationFunc());
             }
         }
         return failure;
@@ -263,72 +292,39 @@ public:
     // 0011nnnnmmmm1110
     static int do_addc_gen_gen_test(Sh4 *cpu, Memory *mem,
                                     reg32_t src1, reg32_t src2) {
-        /*
-         * I don't bother toggling the bank switching flag because if there's a
-         * problem with that, the root-cause will be in Sh4::gen_reg and if the
-         * root-cause is in Sh4::gen_reg then both this function and the opcode
-         * will have the exact same bug, an it will be hidden.
-         */
+        int failure = 0;
+
         for (int reg1_no = 0; reg1_no <= 15; reg1_no++) {
             for (int reg2_no = 0; reg2_no <= 15; reg2_no++) {
-                Sh4Prog test_prog;
-                std::stringstream ss;
-                reg32_t initial_val1 = src1;
-                reg32_t initial_val2;
+                bool expected_t;
+                uint32_t initial_val1 = src1;
+                uint32_t initial_val2;
 
                 if (reg1_no == reg2_no)
                     initial_val2 = initial_val1;
                 else
                     initial_val2 = src2;
 
-                ss << "ADDC R" << reg1_no << ", R" << reg2_no << "\n";
-                test_prog.assemble(ss.str());
-                const Sh4Prog::InstList& inst = test_prog.get_prog();
-                mem->load_program(0, inst.begin(), inst.end());
+                int32_t sum = initial_val1 + initial_val2;
+                GenRegArg reg1(cpu, mem, reg1_no, initial_val1,
+                               reg1_no == reg2_no ? sum : initial_val1);
+                GenRegArg reg2(cpu, mem, reg2_no, initial_val2, sum);
 
-                reset_cpu(cpu);
-
-                *cpu->gen_reg(reg1_no) = initial_val1;
-                *cpu->gen_reg(reg2_no) = initial_val2;
-                cpu->exec_inst();
-
-                reg32_t expected_val = (initial_val1 + initial_val2);
-                reg32_t actual_val = *cpu->gen_reg(reg2_no);
-
-                if (actual_val != expected_val) {
-                    std::cout << "ERROR running: " << std::endl
-                              << "\t" << ss.str() << std::endl;
-                    std::cout << "Expected " << std::hex <<
-                        (initial_val1 + initial_val2) << " but got " <<
-                        actual_val << std::endl;
-                    return 1;
-                }
-
-                // now check the carry-bit
+                bool carry;
                 uint64_t expected_val64 = uint64_t(initial_val1) +
                     uint64_t(initial_val2);
-                if (expected_val64 == uint64_t(actual_val)) {
-                    // there should not be a carry
-                    if (cpu->reg.sr & Sh4::SR_FLAG_T_MASK) {
-                        std::cout << "ERROR running: " << std::endl
-                                  << "\t" << ss.str() << std::endl;
-                        std::cout << "Expected no carry bit "
-                            "(there was a carry)" << std::endl;
-                        return 1;
-                    }
+                if (expected_val64 == uint64_t(initial_val1 + initial_val2)) {
+                    carry = false;
                 } else {
-                    // there should be a carry
-                    if (!(cpu->reg.sr & Sh4::SR_FLAG_T_MASK)) {
-                        std::cout << "ERROR running: " << std::endl
-                                  << "\t" << ss.str() << std::endl;
-                        std::cout << "Expected a carry bit "
-                            "(there was no carry)" << std::endl;
-                        return 1;
-                    }
+                    carry = true;
                 }
+
+                failure = failure ||
+                    do_binary_reg_reg(cpu, mem, "ADDC", reg1, reg2,
+                                      ValidateFlagT(carry));
             }
         }
-        return 0;
+        return failure;
     }
 
     // ADDC Rm, Rn
@@ -366,19 +362,11 @@ public:
     // 0011nnnnmmmm1111
     static int do_addv_gen_gen_test(Sh4 *cpu, Memory *mem,
                                     reg32_t src1, reg32_t src2) {
-        /*
-         * I don't bother toggling the bank switching flag because if there's a
-         * problem with that, the root-cause will be in Sh4::gen_reg and if the
-         * root-cause is in Sh4::gen_reg then both this function and the opcode
-         * will have the exact same bug, an it will be hidden.
-         */
+        int failure = 0;
+
         for (int reg1_no = 0; reg1_no <= 15; reg1_no++) {
             for (int reg2_no = 0; reg2_no <= 15; reg2_no++) {
-                Sh4Prog test_prog;
-                std::stringstream ss;
-
-                // it is not a mistake that I'm using int32_t
-                // here instead of reg32_t
+                bool expected_t;
                 int32_t initial_val1 = src1;
                 int32_t initial_val2;
 
@@ -387,77 +375,30 @@ public:
                 else
                     initial_val2 = src2;
 
-                ss << "ADDV R" << reg1_no << ", R" << reg2_no << "\n";
-                test_prog.assemble(ss.str());
-                const Sh4Prog::InstList& inst = test_prog.get_prog();
-                mem->load_program(0, inst.begin(), inst.end());
+                int32_t sum = initial_val1 + initial_val2;
+                GenRegArg reg1(cpu, mem, reg1_no, initial_val1,
+                               reg1_no == reg2_no ? sum : initial_val1);
+                GenRegArg reg2(cpu, mem, reg2_no, initial_val2, sum);
 
-                reset_cpu(cpu);
+                uint64_t expected_val64 = uint64_t(uint32_t(initial_val1)) +
+                    uint64_t(uint32_t(initial_val2));
 
-                *cpu->gen_reg(reg1_no) = initial_val1;
-                *cpu->gen_reg(reg2_no) = initial_val2;
-                cpu->exec_inst();
+                bool overflow;
 
-                reg32_t expected_val = (initial_val1 + initial_val2);
-                reg32_t actual_val = *cpu->gen_reg(reg2_no);
-
-                if (actual_val != expected_val) {
-                    std::cout << "ERROR running: " << std::endl
-                              << "\t" << ss.str() << std::endl;
-                    std::cout << "Expected " << std::hex <<
-                        (initial_val1 + initial_val2) << " but got " <<
-                        actual_val << std::endl;
-                    return 1;
-                }
-
-                // now check the overflow-bit
-                bool overflow_flag = cpu->reg.sr & Sh4::SR_FLAG_T_MASK;
                 if (initial_val1 >= 0 && initial_val2 >= 0) {
-                    if (std::numeric_limits<int32_t>::max() - initial_val1 <
-                        initial_val2) {
-                        // there should be an overflow
-                        if (!overflow_flag) {
-                            std::cout << "ERROR running: " << std::endl
-                                      << "\t" << ss.str() << std::endl;
-                            std::cout << "Expected an overflow bit "
-                                "(there was no overflow bit set)" << std::endl;
-                            return 1;
-                        }
-                    } else {
-                        //there should not be an overflow
-                        if (overflow_flag) {
-                            std::cout << "ERROR running: " << std::endl
-                                      << "\t" << ss.str() << std::endl;
-                            std::cout << "Expected no overflow bit "
-                                "(there was an overflow bit set)" << std::endl;
-                            return 1;
-                        }
-                    }
-                } else if (initial_val1 < 0 && initial_val2 < 0) {
-                    if (std::numeric_limits<int32_t>::min() - initial_val2 >
-                        initial_val1) {
-                        // there should be an overflow
-                        if (!overflow_flag) {
-                            std::cout << "ERROR running: " << std::endl
-                                      << "\t" << ss.str() << std::endl;
-                            std::cout << "Expected an overflow bit "
-                                "(there was no overflow bit set)" << std::endl;
-                            return 1;
-                        }
-                    } else {
-                        // there should not be an overflow
-                        if (overflow_flag) {
-                            std::cout << "ERROR running: " << std::endl
-                                      << "\t" << ss.str() << std::endl;
-                            std::cout << "Expected no overflow bit "
-                                "(there was an overflow bit set)" << std::endl;
-                            return 1;
-                        }
-                    }
+                    overflow = ((std::numeric_limits<int32_t>::max() -
+                                 initial_val1) < initial_val2);
+                } else {
+                    overflow = ((std::numeric_limits<int32_t>::min() -
+                                 initial_val2) > initial_val1);
                 }
+
+                failure = failure ||
+                    do_binary_reg_reg(cpu, mem, "ADDV", reg1, reg2,
+                                      ValidateFlagT(overflow));
             }
         }
-        return 0;
+        return failure;
     }
 
     // ADDV Rm, Rn
@@ -522,7 +463,8 @@ public:
                               src_val == dst_val ? dst_val - src_val : src_val);
                 GenRegArg dst(cpu, mem, reg2_no, dst_val, dst_val - src_val);
                 failure = failure || do_binary_reg_reg(cpu, mem, "SUB",
-                                                       src, dst);
+                                                       src, dst,
+                                                       DefValidationFunc());
             }
         }
         return failure;
@@ -532,90 +474,32 @@ public:
     // 0011nnnnmmmm1010
     static int do_subc_gen_gen_test(Sh4 *cpu, Memory *mem,
                                     reg32_t src1, reg32_t src2) {
-        /*
-         * I don't bother toggling the bank switching flag because if there's a
-         * problem with that, the root-cause will be in Sh4::gen_reg and if the
-         * root-cause is in Sh4::gen_reg then both this function and the opcode
-         * will have the exact same bug, an it will be hidden.
-         */
+        int failure = 0;
+
         for (int reg1_no = 0; reg1_no <= 15; reg1_no++) {
             for (int reg2_no = 0; reg2_no <= 15; reg2_no++) {
-                Sh4Prog test_prog;
-                std::stringstream ss;
-                reg32_t initial_val1 = src1;
-                reg32_t initial_val2;
+                bool expected_t;
+                uint32_t initial_val1 = src1;
+                uint32_t initial_val2;
 
                 if (reg1_no == reg2_no)
                     initial_val2 = initial_val1;
                 else
                     initial_val2 = src2;
 
-                ss << "SUBC R" << reg1_no << ", R" << reg2_no << "\n";
-                test_prog.assemble(ss.str());
-                const Sh4Prog::InstList& inst = test_prog.get_prog();
-                mem->load_program(0, inst.begin(), inst.end());
+                int32_t diff = initial_val2 - initial_val1;
+                GenRegArg reg1(cpu, mem, reg1_no, initial_val1,
+                               reg1_no == reg2_no ? diff : initial_val1);
+                GenRegArg reg2(cpu, mem, reg2_no, initial_val2, diff);
 
-                reset_cpu(cpu);
+                bool carry = (initial_val1 > initial_val2);
 
-                *cpu->gen_reg(reg1_no) = initial_val1;
-                *cpu->gen_reg(reg2_no) = initial_val2;
-                cpu->exec_inst();
-
-                reg32_t expected_val = initial_val2 - initial_val1;
-                reg32_t actual_val = *cpu->gen_reg(reg2_no);
-
-                if (actual_val != expected_val) {
-                    std::cout << "ERROR running: " << std::endl
-                              << "\t" << ss.str() << std::endl;
-                    std::cout << "Expected " << std::hex <<
-                        (initial_val2 - initial_val1) << " but got " <<
-                        actual_val << std::endl;
-                    std::cout << "initial value of R" << std::dec <<
-                        reg2_no << ": " << std::hex << initial_val2;
-                    std::cout << "initial value of R" << std::dec <<
-                        reg1_no << ": " << std::hex << initial_val1;
-                    return 1;
-                }
-
-                // now check the carry-bit
-                uint64_t expected_val64 = uint64_t(initial_val2) -
-                    uint64_t(initial_val1);
-                if (initial_val1 <= initial_val2) {
-                    // there should not be a carry
-                    if (cpu->reg.sr & Sh4::SR_FLAG_T_MASK) {
-                        std::cout << "ERROR running: " << std::endl
-                                  << "\t" << ss.str() << std::endl;
-                        std::cout << "Expected no carry bit "
-                            "(there was a carry)" << std::endl;
-                        std::cout << "initial value of R" << std::dec <<
-                            reg2_no << ": " << std::hex << initial_val2;
-                        std::cout << "initial value of R" << std::dec <<
-                            reg1_no << ": " << std::hex << initial_val1;
-                        std::cout << "output val: " << std::hex <<
-                            actual_val << std::endl;
-                        return 1;
-                    }
-                } else {
-                    // there should be a carry
-                    if (!(cpu->reg.sr & Sh4::SR_FLAG_T_MASK)) {
-                        std::cout << "ERROR running: " << std::endl
-                                  << "\t" << ss.str() << std::endl;
-                        std::cout << "Expected a carry bit "
-                            "(there was no carry)" << std::endl;
-                        std::cout << "initial value of R" << std::dec <<
-                            reg2_no << ": " << std::hex << initial_val2 <<
-                            std::endl;
-                        std::cout << "initial value of R" << std::dec <<
-                            reg1_no << ": " << std::hex << initial_val1 <<
-                            std::endl;
-                        std::cout << "output val: " << std::hex <<
-                            actual_val << std::endl;
-                        return 1;
-                    }
-                }
+                failure = failure ||
+                    do_binary_reg_reg(cpu, mem, "SUBC", reg1, reg2,
+                                      ValidateFlagT(carry));
             }
         }
-        return 0;
+        return failure;
     }
 
     static int subc_gen_gen_test(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
@@ -648,19 +532,11 @@ public:
 
     static int do_subv_gen_gen_test(Sh4 *cpu, Memory *mem,
                                     reg32_t src1, reg32_t src2) {
-        /*
-         * I don't bother toggling the bank switching flag because if there's a
-         * problem with that, the root-cause will be in Sh4::gen_reg and if the
-         * root-cause is in Sh4::gen_reg then both this function and the opcode
-         * will have the exact same bug, an it will be hidden.
-         */
+        int failure = 0;
+
         for (int reg1_no = 0; reg1_no <= 15; reg1_no++) {
             for (int reg2_no = 0; reg2_no <= 15; reg2_no++) {
-                Sh4Prog test_prog;
-                std::stringstream ss;
-
-                // it is not a mistake that I'm using int32_t
-                // here instead of reg32_t
+                bool expected_t;
                 int32_t initial_val1 = src1;
                 int32_t initial_val2;
 
@@ -669,77 +545,24 @@ public:
                 else
                     initial_val2 = src2;
 
-                ss << "SUBV R" << reg1_no << ", R" << reg2_no << "\n";
-                test_prog.assemble(ss.str());
-                const Sh4Prog::InstList& inst = test_prog.get_prog();
-                mem->load_program(0, inst.begin(), inst.end());
+                int32_t diff = initial_val2 - initial_val1;
+                GenRegArg reg1(cpu, mem, reg1_no, initial_val1,
+                               reg1_no == reg2_no ? diff : initial_val1);
+                GenRegArg reg2(cpu, mem, reg2_no, initial_val2, diff);
 
-                reset_cpu(cpu);
-
-                *cpu->gen_reg(reg1_no) = initial_val1;
-                *cpu->gen_reg(reg2_no) = initial_val2;
-                cpu->exec_inst();
-
-                reg32_t expected_val = initial_val2 - initial_val1;
-                reg32_t actual_val = *cpu->gen_reg(reg2_no);
-
-                if (actual_val != expected_val) {
-                    std::cout << "ERROR running: " << std::endl
-                              << "\t" << ss.str() << std::endl;
-                    std::cout << "Expected " << std::hex <<
-                        (initial_val1 + initial_val2) << " but got " <<
-                        actual_val << std::endl;
-                    return 1;
+                bool overflow = false;
+                if (initial_val2 >= 0 && initial_val1 < 0) {
+                    overflow = diff < 0;
+                } else if (initial_val2 < 0 && initial_val1 >= 0) {
+                    overflow = diff > 0;
                 }
 
-                // now check the overflow-bit
-                bool overflow_flag = cpu->reg.sr & Sh4::SR_FLAG_T_MASK;
-                if (int32_t(initial_val2) >= 0 &&
-                    int32_t(initial_val1) < 0) {
-                    if (int32_t(actual_val) < 0) {
-                        // there should be an overflow
-                        if (!overflow_flag) {
-                            std::cout << "ERROR running: " << std::endl
-                                      << "\t" << ss.str() << std::endl;
-                            std::cout << "Expected an overflow bit "
-                                "(there was no overflow bit set)" << std::endl;
-                            return 1;
-                        }
-                    } else {
-                        //there should not be an overflow
-                        if (overflow_flag) {
-                            std::cout << "ERROR running: " << std::endl
-                                      << "\t" << ss.str() << std::endl;
-                            std::cout << "Expected no overflow bit "
-                                "(there was an overflow bit set)" << std::endl;
-                            return 1;
-                        }
-                    }
-                } else if (int32_t(initial_val2) < 0 &&
-                           int32_t(initial_val1) >= 0) {
-                    if (int32_t(actual_val) > 0) {
-                        // there should be an overflow
-                        if (!overflow_flag) {
-                            std::cout << "ERROR running: " << std::endl
-                                      << "\t" << ss.str() << std::endl;
-                            std::cout << "Expected an overflow bit "
-                                "(there was no overflow bit set)" << std::endl;
-                            return 1;
-                        }
-                    } else {
-                        // there should not be an overflow
-                        if (overflow_flag) {
-                            std::cout << "ERROR running: " << std::endl
-                                      << "\t" << ss.str() << std::endl;
-                            std::cout << "Expected no overflow bit "
-                                "(there was an overflow bit set)" << std::endl;
-                            return 1;
-                        }
-                    }
-                }
+                failure = failure ||
+                    do_binary_reg_reg(cpu, mem, "SUBV", reg1, reg2,
+                                      ValidateFlagT(overflow));
             }
         }
-        return 0;
+        return failure;
     }
 
     static int subv_gen_gen_test(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
@@ -831,7 +654,8 @@ public:
                 GenRegArg dst_op(cpu, mem, reg_no, dst_val,
                                  int32_t(int8_t(imm_val)));
                 failure = failure ||
-                    do_binary_reg_reg(cpu, mem, "MOV", src_op, dst_op);
+                    do_binary_reg_reg(cpu, mem, "MOV", src_op, dst_op,
+                                      DefValidationFunc());
             }
         }
 
@@ -978,7 +802,8 @@ public:
                     do_binary_reg_reg(cpu, mem, "MOV",
                                       GenRegArg(cpu, mem, reg_src, src_val),
                                       GenRegArg(cpu, mem, reg_dst,
-                                                dst_val, src_val));
+                                                dst_val, src_val),
+                                      DefValidationFunc());
             }
         }
         return failed;
@@ -2889,8 +2714,8 @@ public:
             SpecRegArg dst_reg = SpecRegArg(cpu, mem, dst_name,
                                             dstp, dst_val, src_val);
             failure = failure ||
-                do_binary_reg_reg<GenRegArg, SpecRegArg>(
-                    cpu, mem, "LDC", src_reg, dst_reg);
+                do_binary_reg_reg<GenRegArg, SpecRegArg, DefValidationFunc>(
+                    cpu, mem, "LDC", src_reg, dst_reg, DefValidationFunc());
         }
         return failure;
     }
@@ -3321,8 +3146,8 @@ public:
                                             srcp, src_val);
             GenRegArg dst_reg = GenRegArg(cpu, mem, reg_no, dst_val, src_val);
             failure = failure ||
-                do_binary_reg_reg<SpecRegArg, GenRegArg>(
-                    cpu, mem, "STC", src_reg, dst_reg);
+                do_binary_reg_reg<SpecRegArg, GenRegArg, DefValidationFunc>(
+                    cpu, mem, "STC", src_reg, dst_reg, DefValidationFunc());
         }
         return failure;
     }
@@ -3908,8 +3733,8 @@ public:
             SpecRegArg dst_reg = SpecRegArg(cpu, mem, dst_name,
                                             dstp, dst_val, src_val);
             failure = failure ||
-                do_binary_reg_reg<GenRegArg, SpecRegArg>(
-                    cpu, mem, "LDS", src_reg, dst_reg);
+                do_binary_reg_reg<GenRegArg, SpecRegArg, DefValidationFunc>(
+                    cpu, mem, "LDS", src_reg, dst_reg, DefValidationFunc());
         }
         return failure;
     }
@@ -3949,8 +3774,8 @@ public:
                                             srcp, src_val);
             GenRegArg dst_reg = GenRegArg(cpu, mem, reg_no, dst_val, src_val);
             failure = failure ||
-                do_binary_reg_reg<SpecRegArg, GenRegArg>(
-                    cpu, mem, "STS", src_reg, dst_reg);
+                do_binary_reg_reg<SpecRegArg, GenRegArg, DefValidationFunc>(
+                    cpu, mem, "STS", src_reg, dst_reg, DefValidationFunc());
         }
         return failure;
     }
@@ -4370,34 +4195,11 @@ public:
     // 10001000iiiiiiii
     static int do_binary_cmpeq_imm_gen(Sh4 *cpu, Memory *mem,
                                        uint8_t imm_val, reg32_t r0_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "CMP/EQ #" << unsigned(imm_val) << std::dec << ", R0\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        *cpu->gen_reg(0) = r0_val;
-        cpu->exec_inst();
-
+        GenRegArg dst_reg(cpu, mem, 0, r0_val);
+        ImmedArg src_val(cpu, mem, imm_val);
         bool t_expect = (r0_val == int32_t(int8_t(imm_val)));
-
-        if (t_expect && !(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) ||
-            !t_expect && (cpu->reg.sr & Sh4::SR_FLAG_T_MASK)) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "expected t val is " << t_expect << std::endl;
-            std::cout << "actual val is " <<
-                bool(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) << std::endl;
-            std::cout << "r0_val is " << r0_val << std::endl;
-            return 1;
-        }
-
-        return 0;
+        return do_binary_reg_reg(cpu, mem, "CMP/EQ", src_val, dst_reg,
+                                 ValidateFlagT(t_expect));
     }
 
     static int binary_cmpeq_imm_gen(Sh4 *cpu, Memory *mem,
@@ -4424,36 +4226,11 @@ public:
     static int do_binary_cmpeq_gen_gen(Sh4 *cpu, Memory *mem,
                                        unsigned reg1, unsigned reg2,
                                        reg32_t reg1_val, reg32_t reg2_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "CMP/EQ R" << reg1 << ", R" << reg2 << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        *cpu->gen_reg(reg1) = reg1_val;
-        *cpu->gen_reg(reg2) = reg2_val;
-        cpu->exec_inst();
-
+        GenRegArg dst_reg(cpu, mem, reg2, reg2_val);
+        GenRegArg src_reg(cpu, mem, reg1, reg1_val);
         bool t_expect = (reg2_val == reg1_val);
-
-        if (t_expect && !(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) ||
-            !t_expect && (cpu->reg.sr & Sh4::SR_FLAG_T_MASK)) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "expected t val is " << t_expect << std::endl;
-            std::cout << "actual val is " <<
-                bool(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) << std::endl;
-            std::cout << "reg1_val is " << std::hex << reg1_val << std::endl;
-            std::cout << "reg2_val is " << std::hex << reg2_val << std::endl;
-            return 1;
-        }
-
-        return 0;
+        return do_binary_reg_reg(cpu, mem, "CMP/EQ", src_reg, dst_reg,
+                                 ValidateFlagT(t_expect));
     }
 
     static int binary_cmpeq_gen_gen(Sh4 *cpu, Memory *mem,
@@ -4487,36 +4264,11 @@ public:
     static int do_binary_cmphs_gen_gen(Sh4 *cpu, Memory *mem,
                                        unsigned reg1, unsigned reg2,
                                        reg32_t reg1_val, reg32_t reg2_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "CMP/HS R" << reg1 << ", R" << reg2 << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        *cpu->gen_reg(reg1) = reg1_val;
-        *cpu->gen_reg(reg2) = reg2_val;
-        cpu->exec_inst();
-
+        GenRegArg dst_reg(cpu, mem, reg2, reg2_val);
+        GenRegArg src_reg(cpu, mem, reg1, reg1_val);
         bool t_expect = (reg2_val >= reg1_val);
-
-        if (t_expect && !(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) ||
-            !t_expect && (cpu->reg.sr & Sh4::SR_FLAG_T_MASK)) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "expected t val is " << t_expect << std::endl;
-            std::cout << "actual val is " <<
-                bool(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) << std::endl;
-            std::cout << "reg1_val is " << std::hex << reg1_val << std::endl;
-            std::cout << "reg2_val is " << std::hex << reg2_val << std::endl;
-            return 1;
-        }
-
-        return 0;
+        return do_binary_reg_reg(cpu, mem, "CMP/HS", src_reg, dst_reg,
+                                 ValidateFlagT(t_expect));
     }
 
     static int binary_cmphs_gen_gen(Sh4 *cpu, Memory *mem,
@@ -4553,36 +4305,11 @@ public:
     static int do_binary_cmpge_gen_gen(Sh4 *cpu, Memory *mem,
                                        unsigned reg1, unsigned reg2,
                                        reg32_t reg1_val, reg32_t reg2_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "CMP/GE R" << reg1 << ", R" << reg2 << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        *cpu->gen_reg(reg1) = reg1_val;
-        *cpu->gen_reg(reg2) = reg2_val;
-        cpu->exec_inst();
-
+        GenRegArg dst_reg(cpu, mem, reg2, reg2_val);
+        GenRegArg src_reg(cpu, mem, reg1, reg1_val);
         bool t_expect = (int32_t(reg2_val) >= int32_t(reg1_val));
-
-        if (t_expect && !(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) ||
-            !t_expect && (cpu->reg.sr & Sh4::SR_FLAG_T_MASK)) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "expected t val is " << t_expect << std::endl;
-            std::cout << "actual val is " <<
-                bool(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) << std::endl;
-            std::cout << "reg1_val is " << std::hex << reg1_val << std::endl;
-            std::cout << "reg2_val is " << std::hex << reg2_val << std::endl;
-            return 1;
-        }
-
-        return 0;
+        return do_binary_reg_reg(cpu, mem, "CMP/GE", src_reg, dst_reg,
+                                 ValidateFlagT(t_expect));
     }
 
     static int binary_cmpge_gen_gen(Sh4 *cpu, Memory *mem,
@@ -4619,36 +4346,11 @@ public:
     static int do_binary_cmphi_gen_gen(Sh4 *cpu, Memory *mem,
                                        unsigned reg1, unsigned reg2,
                                        reg32_t reg1_val, reg32_t reg2_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "CMP/HI R" << reg1 << ", R" << reg2 << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        *cpu->gen_reg(reg1) = reg1_val;
-        *cpu->gen_reg(reg2) = reg2_val;
-        cpu->exec_inst();
-
+        GenRegArg dst_reg(cpu, mem, reg2, reg2_val);
+        GenRegArg src_reg(cpu, mem, reg1, reg1_val);
         bool t_expect = (reg2_val > reg1_val);
-
-        if (t_expect && !(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) ||
-            !t_expect && (cpu->reg.sr & Sh4::SR_FLAG_T_MASK)) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "expected t val is " << t_expect << std::endl;
-            std::cout << "actual val is " <<
-                bool(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) << std::endl;
-            std::cout << "reg1_val is " << std::hex << reg1_val << std::endl;
-            std::cout << "reg2_val is " << std::hex << reg2_val << std::endl;
-            return 1;
-        }
-
-        return 0;
+        return do_binary_reg_reg(cpu, mem, "CMP/HI", src_reg, dst_reg,
+                                 ValidateFlagT(t_expect));
     }
 
     static int binary_cmphi_gen_gen(Sh4 *cpu, Memory *mem,
@@ -4685,36 +4387,11 @@ public:
     static int do_binary_cmpgt_gen_gen(Sh4 *cpu, Memory *mem,
                                        unsigned reg1, unsigned reg2,
                                        reg32_t reg1_val, reg32_t reg2_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "CMP/GT R" << reg1 << ", R" << reg2 << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        *cpu->gen_reg(reg1) = reg1_val;
-        *cpu->gen_reg(reg2) = reg2_val;
-        cpu->exec_inst();
-
+        GenRegArg dst_reg(cpu, mem, reg2, reg2_val);
+        GenRegArg src_reg(cpu, mem, reg1, reg1_val);
         bool t_expect = (int32_t(reg2_val) > int32_t(reg1_val));
-
-        if (t_expect && !(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) ||
-            !t_expect && (cpu->reg.sr & Sh4::SR_FLAG_T_MASK)) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "expected t val is " << t_expect << std::endl;
-            std::cout << "actual val is " <<
-                bool(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) << std::endl;
-            std::cout << "reg1_val is " << std::hex << reg1_val << std::endl;
-            std::cout << "reg2_val is " << std::hex << reg2_val << std::endl;
-            return 1;
-        }
-
-        return 0;
+        return do_binary_reg_reg(cpu, mem, "CMP/GT", src_reg, dst_reg,
+                                 ValidateFlagT(t_expect));
     }
 
     static int binary_cmpgt_gen_gen(Sh4 *cpu, Memory *mem,
@@ -4749,41 +4426,16 @@ public:
     static int do_binary_cmpstr_gen_gen(Sh4 *cpu, Memory *mem,
                                         unsigned reg1, unsigned reg2,
                                         reg32_t reg1_val, reg32_t reg2_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "CMP/STR R" << reg1 << ", R" << reg2 << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        *cpu->gen_reg(reg1) = reg1_val;
-        *cpu->gen_reg(reg2) = reg2_val;
-        cpu->exec_inst();
-
+        GenRegArg dst_reg(cpu, mem, reg2, reg2_val);
+        GenRegArg src_reg(cpu, mem, reg1, reg1_val);
         bool t_expect = false;
         uint32_t mask = 0xff;
         for (int i = 0; i < 4; i++)
             if ((reg1_val & (0xff << (i * 8))) ==
                 (reg2_val & (0xff << (i * 8))))
                 t_expect = true;
-
-        if (t_expect && !(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) ||
-            !t_expect && (cpu->reg.sr & Sh4::SR_FLAG_T_MASK)) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "expected t val is " << t_expect << std::endl;
-            std::cout << "actual val is " <<
-                bool(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) << std::endl;
-            std::cout << "reg1_val is " << std::hex << reg1_val << std::endl;
-            std::cout << "reg2_val is " << std::hex << reg2_val << std::endl;
-            return 1;
-        }
-
-        return 0;
+        return do_binary_reg_reg(cpu, mem, "CMP/STR", src_reg, dst_reg,
+                                 ValidateFlagT(t_expect));
     }
 
     static int binary_cmpstr_gen_gen(Sh4 *cpu, Memory *mem,
@@ -4798,14 +4450,15 @@ public:
                 failure = failure ||
                     do_binary_cmpstr_gen_gen(cpu, mem, reg1, reg2, val2, val2);
 
-                // test partial equality
-                reg32_t val_tmp =
-                    val2 ^ ~(0xff << (8 * randgen32->pick_range(0, 3)));
-                failure = failure ||
-                    do_binary_cmpstr_gen_gen(cpu, mem, reg1, reg2, val2, val_tmp);
-
-                // test (probable) inequality
                 if (reg1 != reg2) {
+                    // test partial equality
+                    reg32_t val_tmp =
+                        val2 ^ ~(0xff << (8 * randgen32->pick_range(0, 3)));
+                    failure = failure ||
+                        do_binary_cmpstr_gen_gen(cpu, mem, reg1, reg2,
+                                                 val2, val_tmp);
+
+                    // test (probable) inequality
                     failure = failure ||
                         do_binary_cmpstr_gen_gen(cpu, mem, reg1, reg2,
                                                  val2, randgen32->pick_val(0));
@@ -4818,40 +4471,6 @@ public:
 
     // TST Rm, Rn
     // 0010nnnnmmmm1000
-    static int do_binary_tst_gen_gen(Sh4 *cpu, Memory *mem,
-                                     unsigned reg1_no, unsigned reg2_no,
-                                     reg32_t reg1_val, reg32_t reg2_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "TST R" << reg1_no << ", R" << reg2_no << "\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        *cpu->gen_reg(reg1_no) = reg1_val;
-        *cpu->gen_reg(reg2_no) = reg2_val;
-        cpu->exec_inst();
-        bool t_expect = !(reg1_val & reg2_val);
-
-        if (t_expect && !(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) ||
-            !t_expect && (cpu->reg.sr & Sh4::SR_FLAG_T_MASK)) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "expected t val is " << t_expect << std::endl;
-            std::cout << "actual val is " <<
-                bool(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) << std::endl;
-            std::cout << "reg1_val is " << std::hex << reg1_val << std::endl;
-            std::cout << "reg2_val is " << std::hex << reg2_val << std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_tst_gen_gen(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
         int failure = 0;
 
@@ -4863,12 +4482,14 @@ public:
                 if (reg1_no != reg2_no)
                     reg2_val = randgen32->pick_val(0);
 
+                GenRegArg dst_reg(cpu, mem, reg2_no, reg2_val);
+                GenRegArg src_reg(cpu, mem, reg1_no, reg1_val);
+                bool t_expect = !(reg1_val & reg2_val);
                 failure = failure ||
-                    do_binary_tst_gen_gen(cpu, mem, reg1_no, reg2_no,
-                                          reg1_val, reg2_val);
+                    do_binary_reg_reg(cpu, mem, "TST", src_reg, dst_reg,
+                                      ValidateFlagT(t_expect));
             }
         }
-
         return failure;
     }
 
@@ -4925,47 +4546,19 @@ public:
 
     // TST #imm, R0
     // 11001000iiiiiiii
-    static int do_binary_tst_imm_r0(Sh4 *cpu, Memory *mem, uint8_t imm_val,
-                                    reg32_t r0_val) {
-        Sh4Prog test_prog;
-        std::stringstream ss;
-        std::string cmd;
-
-        ss << "TST #" << unsigned(imm_val) << ", R0\n";
-        cmd = ss.str();
-        test_prog.assemble(cmd);
-        const Sh4Prog::InstList& inst = test_prog.get_prog();
-        mem->load_program(0, inst.begin(), inst.end());
-
-        reset_cpu(cpu);
-
-        *cpu->gen_reg(0) = r0_val;
-        cpu->exec_inst();
-        bool t_expect = !(r0_val & imm_val);
-
-        if (t_expect && !(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) ||
-            !t_expect && (cpu->reg.sr & Sh4::SR_FLAG_T_MASK)) {
-            std::cout << "ERROR while running " << cmd << std::endl;
-            std::cout << "expected t val is " << t_expect << std::endl;
-            std::cout << "actual val is " <<
-                bool(cpu->reg.sr & Sh4::SR_FLAG_T_MASK) << std::endl;
-            std::cout << "r0_val is " << std::hex << r0_val << std::endl;
-            std::cout << "imm_val is " << std::hex << unsigned(imm_val) <<
-                std::endl;
-            return 1;
-        }
-
-        return 0;
-    }
-
     static int binary_tst_imm_r0(Sh4 *cpu, Memory *mem, RandGen32 *randgen32) {
         int failure = 0;
 
         for (unsigned imm_val = 0; imm_val < 256; imm_val++) {
-            failure = failure ||
-                do_binary_tst_imm_r0(cpu, mem, imm_val, randgen32->pick_val(0));
-        }
+            reg32_t reg1_val = randgen32->pick_val(0);
 
+            ImmedArg src_val(cpu, mem, imm_val);
+            GenRegArg dst_reg(cpu, mem, 0, reg1_val);
+            bool t_expect = !(reg1_val & imm_val);
+            failure = failure ||
+                do_binary_reg_reg(cpu, mem, "TST", src_val, dst_reg,
+                                  ValidateFlagT(t_expect));
+        }
         return failure;
     }
 
@@ -5041,7 +4634,8 @@ public:
                               src_val == dst_val ? src_val & dst_val : src_val);
                 GenRegArg dst(cpu, mem, reg2_no, dst_val, src_val & dst_val);
                 failure = failure || do_binary_reg_reg(cpu, mem, "AND",
-                                                       src, dst);
+                                                       src, dst,
+                                                       DefValidationFunc());
             }
         }
         return failure;
@@ -5058,7 +4652,8 @@ public:
             GenRegArg dst_op(cpu, mem, 0, dst_val,
                              dst_val & uint32_t(imm_val));
             failure = failure ||
-                do_binary_reg_reg(cpu, mem, "AND", src_op, dst_op);
+                do_binary_reg_reg(cpu, mem, "AND", src_op, dst_op,
+                                  DefValidationFunc());
         }
         return failure;
     }
@@ -5135,7 +4730,8 @@ public:
                               src_val == dst_val ? src_val | dst_val : src_val);
                 GenRegArg dst(cpu, mem, reg2_no, dst_val, src_val | dst_val);
                 failure = failure || do_binary_reg_reg(cpu, mem, "OR",
-                                                       src, dst);
+                                                       src, dst,
+                                                       DefValidationFunc());
             }
         }
         return failure;
@@ -5152,7 +4748,8 @@ public:
             GenRegArg dst_op(cpu, mem, 0, dst_val,
                              dst_val | uint32_t(imm_val));
             failure = failure ||
-                do_binary_reg_reg(cpu, mem, "OR", src_op, dst_op);
+                do_binary_reg_reg(cpu, mem, "OR", src_op, dst_op,
+                                  DefValidationFunc());
         }
         return failure;
     }
@@ -5229,7 +4826,8 @@ public:
                               src_val == dst_val ? src_val ^ dst_val : src_val);
                 GenRegArg dst(cpu, mem, reg2_no, dst_val, src_val ^ dst_val);
                 failure = failure || do_binary_reg_reg(cpu, mem, "XOR",
-                                                       src, dst);
+                                                       src, dst,
+                                                       DefValidationFunc());
             }
         }
         return failure;
@@ -5246,7 +4844,8 @@ public:
             GenRegArg dst_op(cpu, mem, 0, dst_val,
                              dst_val ^ uint32_t(imm_val));
             failure = failure ||
-                do_binary_reg_reg(cpu, mem, "XOR", src_op, dst_op);
+                do_binary_reg_reg(cpu, mem, "XOR", src_op, dst_op,
+                                  DefValidationFunc());
         }
         return failure;
     }
@@ -5323,7 +4922,8 @@ public:
                               src_val == dst_val ? ~src_val : src_val);
                 GenRegArg dst(cpu, mem, reg2_no, dst_val, ~src_val);
                 failure = failure || do_binary_reg_reg(cpu, mem, "NOT",
-                                                       src, dst);
+                                                       src, dst,
+                                                       DefValidationFunc());
             }
         }
         return failure;
