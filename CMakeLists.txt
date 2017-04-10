@@ -39,8 +39,9 @@ endif()
 
 option(ENABLE_SH4_MMU "emulate the sh4's Memory Management Unit (MMU)" ON)
 option(ENABLE_DEBUGGER "Enable the debugger" ON)
-option(ENABLE_DIRECT_BOOT "Enable direct boot mode (skip boot rom and \
-immediately load IP.BIN or 1ST_READ.BIN)" ON)
+
+# direct-boot mode skips the boot rom and goes straight to IP.BIN/1ST_READ.BIN
+option(ENABLE_DIRECT_BOOT "Enable direct boot mode" ON)
 option(DBG_EXIT_ON_UNDEFINED_OPCODE "Bail out if the emulator hits an undefined opcode" OFF)
 option(ENABLE_SERIAL_SERVER "Enable serial server over TCP port 1998" ON)
 option(INVARIANTS "runtime sanity checks that should never fail" ON)
