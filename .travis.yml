@@ -11,9 +11,9 @@ env:
   - DO_ENABLE_SH4_MMU=OFF
   - DO_ENABLE_SH4_MMU=ON
 before-install:
+  - sudo apti-get install xorg-dev
   - sudo apt-get install libxrandr-dev
 script:
-  sudo apti-get install xorg-dev
   mkdir build ;
   cd build ;
   cmake -DENABLE_SH4_MMU=$DO_ENABLE_SH4_MMU .. || exit 1;
