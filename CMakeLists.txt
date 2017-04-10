@@ -45,6 +45,8 @@ option(DBG_EXIT_ON_UNDEFINED_OPCODE "Bail out if the emulator hits an undefined 
 option(ENABLE_SERIAL_SERVER "Enable serial server over TCP port 1998" ON)
 option(INVARIANTS "runtime sanity checks that should never fail" ON)
 
+add_subdirectory(external/glfw)
+
 if (ENABLE_DIRECT_BOOT)
    add_definitions(-DENABLE_DIRECT_BOOT)
 endif()
@@ -117,7 +119,9 @@ set(sh4_sources "${PROJECT_SOURCE_DIR}/src/hw/sh4/sh4.cpp"
                 "${PROJECT_SOURCE_DIR}/src/dc_sched.hpp"
                 "${PROJECT_SOURCE_DIR}/src/dc_sched.cpp"
                 "${PROJECT_SOURCE_DIR}/src/BiosFile.hpp"
-                "${PROJECT_SOURCE_DIR}/src/BiosFile.cpp")
+                "${PROJECT_SOURCE_DIR}/src/BiosFile.cpp"
+                "${PROJECT_SOURCE_DIR}/src/window.cpp"
+                "${PROJECT_SOURCE_DIR}/src/window.hpp")
 
 if (ENABLE_SH4_MMU)
     add_definitions(-DENABLE_SH4_MMU)
@@ -147,30 +151,40 @@ set(sh4asm_core_sources "${PROJECT_SOURCE_DIR}/src/tool/sh4asm/Inst.cpp"
 include_directories("${PROJECT_SOURCE_DIR}/src/"
                     "${PROJECT_SOURCE_DIR}/src/hw/sh4"
                     "${PROJECT_SOURCE_DIR}/src/common"
-                    "${PROJECT_SOURCE_DIR}/external")
+                    "${PROJECT_SOURCE_DIR}/external"
+                    "${PROJECT_SOURCE_DIR}/external/glfw/include")
+
+link_directories("${CMAKE_BINARY_DIR}/external/glfw/src/")
 
 add_library(sh4asm_core ${sh4asm_core_sources})
 add_library(sh4 ${sh4_sources})
 add_library(boost_system "${PROJECT_SOURCE_DIR}/external/washingtondc-boost/libs/system/src/error_code.cpp")
 
+# TODO: These shouldn't all need to be linked against GLFW, but there are some
+# GLFW function calls in Dreamcast.cpp, and since that's linked into libsh4
+# (which it shouldn't be, but it is) everything that uses libsh4 also needs to
+# link against GLFW.
+#
+# Ideally, only washingtondc should need GLFW
+
 add_executable(sh4asm_test "${PROJECT_SOURCE_DIR}/unit_tests/sh4asm_test.cpp")
-target_link_libraries(sh4asm_test sh4asm_core boost_system rt)
+target_link_libraries(sh4asm_test sh4asm_core boost_system rt GL glfw GLEW)
 
 add_executable(sh4mem_test "${PROJECT_SOURCE_DIR}/unit_tests/sh4mem_test.cpp")
-target_link_libraries(sh4mem_test sh4 boost_system rt)
+target_link_libraries(sh4mem_test sh4 boost_system rt GL glfw GLEW)
 
 add_executable(sh4inst_test "${PROJECT_SOURCE_DIR}/unit_tests/sh4inst_test.cpp")
-target_link_libraries(sh4inst_test sh4 sh4asm_core boost_system rt)
+target_link_libraries(sh4inst_test sh4 sh4asm_core boost_system rt GL glfw GLEW)
 
 add_executable(sh4tmu_test "${PROJECT_SOURCE_DIR}/unit_tests/sh4tmu_test.cpp")
-target_link_libraries(sh4tmu_test sh4 sh4asm_core boost_system rt)
+target_link_libraries(sh4tmu_test sh4 sh4asm_core boost_system rt GL glfw GLEW)
 
 add_executable(sh4div_test "${PROJECT_SOURCE_DIR}/unit_tests/sh4div_test.cpp")
-target_link_libraries(sh4div_test sh4 sh4asm_core boost_system rt)
+target_link_libraries(sh4div_test sh4 sh4asm_core boost_system rt GL glfw GLEW)
 
 add_executable(sh4asm "${PROJECT_SOURCE_DIR}/src/tool/sh4asm/main.cpp")
 target_link_libraries(sh4asm sh4asm_core rt)
 
 add_executable(washingtondc ${washingtondc_sources})
 
-target_link_libraries(washingtondc sh4 boost_system rt)
+target_link_libraries(washingtondc sh4 boost_system rt GL glfw GLEW)

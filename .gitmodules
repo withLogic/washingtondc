@@ -1,3 +1,6 @@
 [submodule "external/washingtondc-boost"]
 	path = external/washingtondc-boost
 	url = https://github.com/washingtondc-emu/washingtondc-boost
+[submodule "external/glfw"]
+	path = external/glfw
+	url = https://github.com/glfw/glfw
