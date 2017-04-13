@@ -1,0 +1,9 @@
+version: 2
+jobs:
+  build:
+    working_directory: ~/washingtondc
+  docker:
+    - image: fedora:rawhide
+  steps:
+    - checkout
+    - run: mkdir build && cd build && cmake .. && make
