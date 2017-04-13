@@ -13,7 +13,6 @@ addons:
     packages:
     - libglfw-dev
     - libglew-dev
-    - libgl-dev
     - libgl1-mesa-dev
 script:
   mkdir build ;
