@@ -47,6 +47,7 @@ option(ENABLE_SERIAL_SERVER "Enable serial server over TCP port 1998" ON)
 option(INVARIANTS "runtime sanity checks that should never fail" ON)
 
 add_subdirectory(external/glfw)
+add_subdirectory(external/washingtondc-glew/build/cmake)
 
 if (ENABLE_DIRECT_BOOT)
    add_definitions(-DENABLE_DIRECT_BOOT)
@@ -159,7 +160,8 @@ include_directories("${PROJECT_SOURCE_DIR}/src/"
                     "${PROJECT_SOURCE_DIR}/external"
                     "${PROJECT_SOURCE_DIR}/external/glfw/include")
 
-link_directories("${CMAKE_BINARY_DIR}/external/glfw/src/")
+link_directories("${CMAKE_BINARY_DIR}/external/glfw/src/"
+                 "${CMAKE_BINARY_DIR}/lib/") # this is where GLEW ends up
 
 add_library(sh4asm_core ${sh4asm_core_sources})
 add_library(sh4 ${sh4_sources})
