@@ -11,7 +11,7 @@ env:
 addons:
   apt:
     packages:
-    - libglfw-dev
+    - libglfw3-dev
     - libglew-dev
     - libgl1-mesa-dev
 script:
