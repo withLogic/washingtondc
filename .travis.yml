@@ -8,6 +8,12 @@ git:
 env:
   - DO_ENABLE_SH4_MMU=OFF
   - DO_ENABLE_SH4_MMU=ON
+addons:
+  apt:
+    packages:
+    - libglfw3-dev
+    - libglew-dev
+    - libgl-dev
 script:
   mkdir build ;
   cd build ;
