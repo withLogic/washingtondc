@@ -6,4 +6,7 @@ jobs:
     - image: fedora:rawhide
   steps:
     - checkout
-    - run: mkdir build && cd build && cmake .. && make
+    - run: mkdir build
+    - run: cd build
+    - run: cmake ..
+    - run: make
