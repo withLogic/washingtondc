@@ -4,6 +4,7 @@ compiler:
 os:
 - linux
 dist: trusty
+sudo: required
 git:
   submodules: true
 env:
@@ -15,6 +16,8 @@ addons:
     - libglfw3-dev
     - libglew-dev
     - libgl1-mesa-dev
+before_install:
+    - sudo apt-get -qq update
 script:
   mkdir build ;
   cd build ;
