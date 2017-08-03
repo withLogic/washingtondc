@@ -193,17 +193,17 @@ void opengl_video_update_framebuffer() {
 }
 
 void opengl_video_present() {
-    glViewport(0, 0, 640, 480); // TODO: don't hardcode
-    glUseProgram(fb_shader.shader_prog_obj);
-    glBindTexture(GL_TEXTURE_2D, fb_poly.tex_obj);
-    glUniform1i(glGetUniformLocation(fb_shader.shader_prog_obj, "fb_tex"), 0);
+    /* glViewport(0, 0, 640, 480); // TODO: don't hardcode */
+    /* glUseProgram(fb_shader.shader_prog_obj); */
+    /* glBindTexture(GL_TEXTURE_2D, fb_poly.tex_obj); */
+    /* glUniform1i(glGetUniformLocation(fb_shader.shader_prog_obj, "fb_tex"), 0); */
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindVertexArray(fb_poly.vao);
-    glDrawElements(GL_TRIANGLE_STRIP, FB_QUAD_IDX_COUNT, GL_UNSIGNED_INT, 0);
+    /* glActiveTexture(GL_TEXTURE0); */
+    /* glBindVertexArray(fb_poly.vao); */
+    /* glDrawElements(GL_TRIANGLE_STRIP, FB_QUAD_IDX_COUNT, GL_UNSIGNED_INT, 0); */
 
-    glBindVertexArray(0);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    /* glBindVertexArray(0); */
+    /* glBindTexture(GL_TEXTURE_2D, 0); */
 }
 
 static void init_poly() {

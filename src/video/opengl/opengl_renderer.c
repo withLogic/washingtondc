@@ -293,9 +293,9 @@ void render_next_geo_buf(void) {
             }
         }
 
-        opengl_target_begin(geo->screen_width, geo->screen_height);
+        /* opengl_target_begin(geo->screen_width, geo->screen_height); */
         render_do_draw(geo);
-        opengl_target_end();
+        /* opengl_target_end(); */
 
         framebuffer_set_current(FRAMEBUFFER_CURRENT_HOST);
 
