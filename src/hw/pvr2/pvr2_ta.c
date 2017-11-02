@@ -928,6 +928,7 @@ static void on_sprite_received(void) {
            poly_state.sprite_offs_color_rgba, sizeof(float) * 4);
     vert_ptr[GEO_BUF_TEX_COORD_OFFSET + 0] = uv[0][0];
     vert_ptr[GEO_BUF_TEX_COORD_OFFSET + 1] = uv[0][1];
+    group->barycenter_depth += vert_ptr[GEO_BUF_POS_OFFSET + 2];
     group->n_verts++;
 
     vert_ptr = group->verts + GEO_BUF_VERT_LEN * group->n_verts;
@@ -941,6 +942,7 @@ static void on_sprite_received(void) {
            poly_state.sprite_offs_color_rgba, sizeof(float) * 4);
     vert_ptr[GEO_BUF_TEX_COORD_OFFSET + 0] = uv[1][0];
     vert_ptr[GEO_BUF_TEX_COORD_OFFSET + 1] = uv[1][1];
+    group->barycenter_depth += vert_ptr[GEO_BUF_POS_OFFSET + 2];
     group->n_verts++;
 
     vert_ptr = group->verts + GEO_BUF_VERT_LEN * group->n_verts;
@@ -954,6 +956,7 @@ static void on_sprite_received(void) {
            poly_state.sprite_offs_color_rgba, sizeof(float) * 4);
     vert_ptr[GEO_BUF_TEX_COORD_OFFSET + 0] = uv[2][0];
     vert_ptr[GEO_BUF_TEX_COORD_OFFSET + 1] = uv[2][1];
+    group->barycenter_depth += vert_ptr[GEO_BUF_POS_OFFSET + 2];
     group->n_verts++;
 
     vert_ptr = group->verts + GEO_BUF_VERT_LEN * group->n_verts;
@@ -967,6 +970,7 @@ static void on_sprite_received(void) {
            poly_state.sprite_offs_color_rgba, sizeof(float) * 4);
     vert_ptr[GEO_BUF_TEX_COORD_OFFSET + 0] = uv[0][0];
     vert_ptr[GEO_BUF_TEX_COORD_OFFSET + 1] = uv[0][1];
+    group->barycenter_depth += vert_ptr[GEO_BUF_POS_OFFSET + 2];
     group->n_verts++;
 
     vert_ptr = group->verts + GEO_BUF_VERT_LEN * group->n_verts;
@@ -980,6 +984,7 @@ static void on_sprite_received(void) {
            poly_state.sprite_offs_color_rgba, sizeof(float) * 4);
     vert_ptr[GEO_BUF_TEX_COORD_OFFSET + 0] = uv[2][0];
     vert_ptr[GEO_BUF_TEX_COORD_OFFSET + 1] = uv[2][1];
+    group->barycenter_depth += vert_ptr[GEO_BUF_POS_OFFSET + 2];
     group->n_verts++;
 
     vert_ptr = group->verts + GEO_BUF_VERT_LEN * group->n_verts;
@@ -993,6 +998,7 @@ static void on_sprite_received(void) {
            poly_state.sprite_offs_color_rgba, sizeof(float) * 4);
     vert_ptr[GEO_BUF_TEX_COORD_OFFSET + 0] = uv[3][0];
     vert_ptr[GEO_BUF_TEX_COORD_OFFSET + 1] = uv[3][1];
+    group->barycenter_depth += vert_ptr[GEO_BUF_POS_OFFSET + 2];
     group->n_verts++;
 
     if (p1[2] < geo->clip_min)
@@ -1067,12 +1073,14 @@ static void on_vertex_received(void) {
             memcpy(group->verts + GEO_BUF_VERT_LEN * group->n_verts,
                    poly_state.strip_vert1, sizeof(poly_state.strip_vert1));
             group->n_verts++;
+            group->barycenter_depth += poly_state.strip_vert1[2];
         }
 
         if (group->n_verts < GEO_BUF_VERT_COUNT) {
             memcpy(group->verts + GEO_BUF_VERT_LEN * group->n_verts,
                    poly_state.strip_vert2, sizeof(poly_state.strip_vert2));
             group->n_verts++;
+            group->barycenter_depth += poly_state.strip_vert2[2];
         }
     }
 
@@ -1094,6 +1102,8 @@ static void on_vertex_received(void) {
             ta_fifo_float[2];
         group->verts[GEO_BUF_VERT_LEN * group->n_verts + GEO_BUF_POS_OFFSET + 2] =
             z_recip;
+
+        group->barycenter_depth += z_recip;
 
         if (poly_state.tex_enable) {
             unsigned dst_uv_offset =
@@ -1406,6 +1416,8 @@ static void finish_poly_group(struct geo_buf *geo,
         error_set_geo_buf_group_index(group - list->groups);
         RAISE_ERROR(ERROR_INTEGRITY);
     }
+
+    group->barycenter_depth /= (float)group->n_verts;
 }
 
 static void next_poly_group(struct geo_buf *geo,
@@ -1430,6 +1442,7 @@ static void next_poly_group(struct geo_buf *geo,
     struct poly_group *new_group = list->groups + (list->n_groups - 1);
     new_group->n_verts = 0;
     new_group->tex_enable = false;
+    new_group->barycenter_depth = 0.0f;
 }
 
 static enum vert_type classify_vert(void) {

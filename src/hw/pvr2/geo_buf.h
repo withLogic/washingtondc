@@ -130,6 +130,26 @@ struct poly_group {
     unsigned n_verts;
     float verts[GEO_BUF_VERT_COUNT * GEO_BUF_VERT_LEN];
 
+    /*
+     * the depth of the geometric barycenter of this polygon group.  This is
+     * used for autosort mode.
+     *
+     * autosort is supposed to be perfect, so ideally I'd be using some sort of
+     * quake-like BSP tree, but that's not a trivial problem.  The next-best
+     * solution would be to sort every individual triangle based on its own
+     * geometric barycenter.  This is also somewhat difficult since I'd need to
+     * be prepared to switch the texture and blending settings on a per-polygon
+     * basis.
+     *
+     * The least desirable solution is to do the sorting on a per-group basis
+     * and pray that is "good enough".  This is the solution I have opted for
+     * because it is easier than the other two.  This has numerous problems,
+     * but at least it will fix the very obvious cases where there are UI
+     * elements that need autosorting to work (like the RTC reset screen in the
+     * firmware menu).
+     */
+    float barycenter_depth;
+
     bool tex_enable;
     unsigned tex_idx; // only valid if tex_enable=true
     enum tex_inst tex_inst;
@@ -161,6 +181,13 @@ struct display_list {
     struct poly_group *groups;
 
     bool blend_enable;
+
+    /*
+     * If this is true, this list's polygons will be drawn in order from back
+     * to front.  This should only be set for DISPLAY_LIST_TRANS, and even then
+     * it won't always be set.
+     */
+    bool autosort;
 };
 
 enum display_list_type {

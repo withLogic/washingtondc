@@ -81,4 +81,14 @@ void rend_draw_geo_buf(struct geo_buf *geo);
  */
 void rend_wait_for_frame_stamp(unsigned stamp);
 
+/*
+ * this implements polygon autosorting on a per-group basis (ideally it would
+ * be per-polygon and it would account for polygon splitting, but that is not
+ * how it is implemented).  order should be a pre-allocated array with a length
+ * of n_groups; after this function returns order will contain the indices of
+ * each group ordered from back (minimum Z) to front (maximum Z).
+ */
+void rend_sort_groups(unsigned *order, struct poly_group const *group,
+                      unsigned n_groups);
+
 #endif

@@ -129,3 +129,26 @@ void rend_wait_for_frame_stamp(unsigned stamp) {
     if (pthread_mutex_unlock(&frame_stamp_mtx) != 0)
         abort(); // TODO: error handling
 }
+
+void rend_sort_groups(unsigned *order, struct poly_group const *group,
+                      unsigned n_groups) {
+    unsigned group_no, cmp_no;
+    for (group_no = 0; group_no < n_groups; group_no++)
+        order[group_no] = group_no;
+
+    if (!n_groups)
+        return;
+
+    // use a simple insertion sort algorithm because i'm a plebian
+    for (group_no = 0; group_no < n_groups - 1; group_no++) {
+        for (cmp_no = group_no + 1; cmp_no < n_groups; cmp_no++) {
+            unsigned group_idx = order[group_no];
+            unsigned cmp_idx = order[cmp_no];
+            if ((1.0 / group[cmp_idx].barycenter_depth) <
+                (1.0 / group[group_idx].barycenter_depth)) {
+                order[group_no] = cmp_idx;
+                order[cmp_no] = group_idx;
+            }
+        }
+    }
+}

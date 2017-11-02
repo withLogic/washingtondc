@@ -40,14 +40,17 @@ void geo_buf_init(struct geo_buf *buf) {
     buf->clip_min = -1.0f;
     buf->clip_max = 1.0f;
 
-#ifdef INVARIANTS
     enum display_list_type disp_list;
+    struct display_list *listp;
     for (disp_list = DISPLAY_LIST_FIRST; disp_list < DISPLAY_LIST_COUNT;
          disp_list++) {
-        if (buf->lists[disp_list].n_groups != 0)
+        listp = buf->lists + disp_list;
+#ifdef INVARIANTS
+        if (listp->n_groups != 0)
             RAISE_ERROR(ERROR_INTEGRITY);
-    }
 #endif
+        listp->autosort = false;
+    }
 }
 
 unsigned get_cur_frame_stamp(void) {
