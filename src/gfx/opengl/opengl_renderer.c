@@ -508,9 +508,10 @@ static void opengl_renderer_do_draw_geo_buf(struct geo_buf *geo) {
                 render_do_draw_group(geo, disp_list, order[group_no]);
             }
             free(order);
+        } else {
+            for (group_no = 0; group_no < list->n_groups; group_no++)
+                render_do_draw_group(geo, disp_list, group_no);
         }
-        for (group_no = 0; group_no < list->n_groups; group_no++)
-            render_do_draw_group(geo, disp_list, group_no);
     }
 }
 
