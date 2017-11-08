@@ -502,7 +502,7 @@ static void opengl_renderer_do_draw_geo_buf(struct geo_buf *geo) {
             unsigned *order = malloc(sizeof(unsigned) * list->n_groups);
             rend_sort_groups(order, list->groups, list->n_groups);
             for (group_no = 0; group_no < list->n_groups; group_no++) {
-                list->groups[order[group_no]].enable_depth_writes = true;
+                list->groups[order[group_no]].enable_depth_writes = false;
                 list->groups[order[group_no]].depth_func = PVR2_DEPTH_GEQUAL;
 
                 render_do_draw_group(geo, disp_list, order[group_no]);
