@@ -317,24 +317,6 @@ void dreamcast_run() {
     dreamcast_cleanup();
 }
 
-static inline void sh4_cycle_advance(dc_cycle_stamp_t n_cycles) {
-    /*
-     * Advance the cycle counter based on how many cycles this instruction
-     * will take.  If this would take us past the target stamp, that means
-     * the next event should occur while this instruction is executing.
-     * Instead of trying to implement that, I execute the instruction
-     * without advancing the cycle count beyond dc_sched_target_stamp.  This
-     * way, the CPU may appear to be a little faster than it should be from
-     * a guest program's perspective, but the passage of time will still be
-     * consistent.
-     */
-    dc_cycle_stamp_t cycles_after = dc_cycle_stamp() +
-        n_cycles * SH4_CLOCK_SCALE;
-    if (cycles_after > dc_sched_target_stamp)
-        cycles_after = dc_sched_target_stamp;
-    dc_cycle_advance(cycles_after - dc_cycle_stamp());
-}
-
 #ifdef ENABLE_DEBUGGER
 static void dreamcast_check_debugger(void) {
     /*
@@ -366,8 +348,6 @@ static void dc_run_to_next_event(Sh4 *sh4) {
         op = sh4_decode_inst(sh4, inst);
 
         sh4_do_exec_inst(sh4, inst, op);
-
-        sh4_cycle_advance(sh4_count_inst_cycles(sh4, op->group, op->issue));
     }
 }
 
@@ -379,8 +359,6 @@ void dc_single_step(Sh4 *sh4) {
     InstOpcode const *op = sh4_decode_inst(sh4, inst);
 
     sh4_do_exec_inst(sh4, inst, op);
-
-    sh4_cycle_advance(sh4_count_inst_cycles(sh4, op->group, op->issue));
 
     // now execute any events which would have happened during that instruction
     SchedEvent *next_event;
