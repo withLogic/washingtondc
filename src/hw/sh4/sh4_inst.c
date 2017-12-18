@@ -115,6 +115,26 @@ static void do_check_fpscr(reg32_t fpscr, reg32_t mask, reg32_t expect,
 
 #endif
 
+static inline void sh4_cycle_advance(Sh4 *sh4, sh4_inst_group_t group, unsigned issue) {
+    unsigned n_cycles = sh4_count_inst_cycles(sh4, group, issue);
+
+    /*
+     * Advance the cycle counter based on how many cycles this instruction
+     * will take.  If this would take us past the target stamp, that means
+     * the next event should occur while this instruction is executing.
+     * Instead of trying to implement that, I execute the instruction
+     * without advancing the cycle count beyond dc_sched_target_stamp.  This
+     * way, the CPU may appear to be a little faster than it should be from
+     * a guest program's perspective, but the passage of time will still be
+     * consistent.
+     */
+    dc_cycle_stamp_t cycles_after = dc_cycle_stamp() +
+        n_cycles * SH4_CLOCK_SCALE;
+    if (cycles_after > dc_sched_target_stamp)
+        cycles_after = dc_sched_target_stamp;
+    dc_cycle_advance(cycles_after - dc_cycle_stamp());
+}
+
 static struct InstOpcode opcode_list[] = {
     // RTS
     { "0000000000001011", &sh4_inst_rts, true, SH4_GROUP_CO, 2 },
@@ -1109,6 +1129,8 @@ void sh4_inst_rts(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->delayed_branch_addr = sh4->reg[SH4_REG_PR];
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0000000000101000 0xffff
@@ -1123,6 +1145,8 @@ void sh4_inst_clrmac(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_MACL] = sh4->reg[SH4_REG_MACH] = 0;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0000000001001000 0xffff
@@ -1137,6 +1161,8 @@ void sh4_inst_clrs(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] &= ~SH4_SR_FLAG_S_MASK;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 
@@ -1152,6 +1178,8 @@ void sh4_inst_clrt(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] &= ~SH4_SR_FLAG_T_MASK;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_0000000000111000 0xffff
@@ -1167,6 +1195,8 @@ void sh4_inst_ldtlb(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("0000000000111000");
     error_set_opcode_name("LDTLB");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0000000000001001 0xffff
@@ -1181,6 +1211,8 @@ void sh4_inst_nop(Sh4 *sh4, Sh4OpArgs inst) {
     // do nothing
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_0000000000101011 0xffff
@@ -1231,6 +1263,8 @@ void sh4_inst_rte(Sh4 *sh4, Sh4OpArgs inst) {
     sh4_on_sr_change(sh4, old_sr_val);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0000000001011000 0xffff
@@ -1245,6 +1279,8 @@ void sh4_inst_sets(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] |= SH4_SR_FLAG_S_MASK;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0000000000011000 0xffff
@@ -1259,6 +1295,8 @@ void sh4_inst_sett(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] |= SH4_SR_FLAG_T_MASK;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_0000000000011011 0xffff
@@ -1273,6 +1311,7 @@ void sh4_inst_sleep(Sh4 *sh4, Sh4OpArgs inst) {
     if (sh4->exec_state == SH4_EXEC_STATE_NORM) {
         if (!(sh4->reg[SH4_REG_SR] & SH4_SR_MD_MASK)) {
             sh4_set_exception(sh4, SH4_EXCP_GEN_ILLEGAL_INST);
+            sh4_cycle_advance(sh4, SH4_GROUP_CO, 4);
             return;
         }
 
@@ -1286,6 +1325,8 @@ void sh4_inst_sleep(Sh4 *sh4, Sh4OpArgs inst) {
         else
             sh4->exec_state = SH4_EXEC_STATE_SLEEP;
     }
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 4);
 }
 
 #define INST_MASK_1111101111111101 0xffff
@@ -1308,6 +1349,8 @@ void sh4_inst_frchg(Sh4 *sh4, Sh4OpArgs inst) {
     sh4_fpu_bank_switch(sh4);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111001111111101 0xffff
@@ -1328,6 +1371,8 @@ void sh4_inst_fschg(Sh4 *sh4, Sh4OpArgs inst) {
 
     sh4->reg[SH4_REG_FPSCR] ^= SH4_FPSCR_SZ_MASK;
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_0000nnnn00101001 0xf0ff
@@ -1343,6 +1388,8 @@ void sh4_inst_unary_movt_gen(Sh4 *sh4, Sh4OpArgs inst) {
         (reg32_t)((sh4->reg[SH4_REG_SR] & SH4_SR_FLAG_T_MASK) >> SH4_SR_FLAG_T_SHIFT);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00010001 0xf0ff
@@ -1360,6 +1407,8 @@ void sh4_inst_unary_cmppz_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] |= flag << SH4_SR_FLAG_T_SHIFT;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_0100nnnn00010101 0xf0ff
@@ -1377,6 +1426,8 @@ void sh4_inst_unary_cmppl_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] |= flag << SH4_SR_FLAG_T_SHIFT;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_0100nnnn00010000 0xf0ff
@@ -1394,6 +1445,8 @@ void sh4_inst_unary_dt_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] |= (!*valp) << SH4_SR_FLAG_T_SHIFT;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00000100 0xf0ff
@@ -1415,6 +1468,8 @@ void sh4_inst_unary_rotl_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = val;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00000101 0xf0ff
@@ -1436,6 +1491,8 @@ void sh4_inst_unary_rotr_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = val;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00100100 0xf0ff
@@ -1458,6 +1515,8 @@ void sh4_inst_unary_rotcl_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = val;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00100101 0xf0ff
@@ -1480,6 +1539,8 @@ void sh4_inst_unary_rotcr_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = val;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00100000 0xf0ff
@@ -1501,6 +1562,8 @@ void sh4_inst_unary_shal_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = val;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00100001 0xf0ff
@@ -1522,6 +1585,8 @@ void sh4_inst_unary_shar_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = val;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00000000 0xf0ff
@@ -1543,6 +1608,8 @@ void sh4_inst_unary_shll_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = val;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00000001 0xf0ff
@@ -1564,6 +1631,8 @@ void sh4_inst_unary_shlr_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = val;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00001000 0xf0ff
@@ -1582,6 +1651,8 @@ void sh4_inst_unary_shll2_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = val;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00001001 0xf0ff
@@ -1600,6 +1671,8 @@ void sh4_inst_unary_shlr2_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = val;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00011000 0xf0ff
@@ -1618,6 +1691,8 @@ void sh4_inst_unary_shll8_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = val;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00011001 0xf0ff
@@ -1636,6 +1711,8 @@ void sh4_inst_unary_shlr8_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = val;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00101000 0xf0ff
@@ -1654,6 +1731,8 @@ void sh4_inst_unary_shll16_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = val;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnn00101001 0xf0ff
@@ -1672,6 +1751,8 @@ void sh4_inst_unary_shlr16_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = val;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0000nnnn00100011 0xf0ff
@@ -1687,6 +1768,8 @@ void sh4_inst_unary_braf_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->delayed_branch_addr = sh4->reg[SH4_REG_PC] + *sh4_gen_reg(sh4, inst.gen_reg) + 4;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0000nnnn00000011 0xf0ff
@@ -1703,6 +1786,8 @@ void sh4_inst_unary_bsrf_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->delayed_branch_addr = sh4->reg[SH4_REG_PC] + *sh4_gen_reg(sh4, inst.gen_reg) + 4;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_10001000iiiiiiii 0xff00
@@ -1719,6 +1804,8 @@ void sh4_inst_binary_cmpeq_imm_r0(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] |= ((*sh4_gen_reg(sh4, 0) == imm_val) << SH4_SR_FLAG_T_SHIFT);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_11001101iiiiiiii 0xff00
@@ -1733,15 +1820,21 @@ void sh4_inst_binary_andb_imm_r0_gbr(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t addr = *sh4_gen_reg(sh4, 0) + sh4->reg[SH4_REG_GBR];
     uint8_t val;
 
-    if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0)
+    if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0) {
+        sh4_cycle_advance(sh4, SH4_GROUP_CO, 4);
         return;
+    }
 
     val &= inst.imm8;
 
-    if (sh4_write_mem(sh4, &val, addr, sizeof(val)) != 0)
+    if (sh4_write_mem(sh4, &val, addr, sizeof(val)) != 0) {
+        sh4_cycle_advance(sh4, SH4_GROUP_CO, 4);
         return;
+    }
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 4);
 }
 
 #define INST_MASK_11001001iiiiiiii 0xff00
@@ -1756,6 +1849,8 @@ void sh4_inst_binary_and_imm_r0(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, 0) &= inst.imm8;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_11001111iiiiiiii 0xff00
@@ -1770,15 +1865,21 @@ void sh4_inst_binary_orb_imm_r0_gbr(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t addr = *sh4_gen_reg(sh4, 0) + sh4->reg[SH4_REG_GBR];
     uint8_t val;
 
-    if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0)
+    if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0) {
+        sh4_cycle_advance(sh4, SH4_GROUP_CO, 4);
         return;
+    }
 
     val |= inst.imm8;
 
-    if (sh4_write_mem(sh4, &val, addr, sizeof(val)) != 0)
+    if (sh4_write_mem(sh4, &val, addr, sizeof(val)) != 0) {
+        sh4_cycle_advance(sh4, SH4_GROUP_CO, 4);
         return;
+    }
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 4);
 }
 
 #define INST_MASK_11001011iiiiiiii 0xff00
@@ -1793,6 +1894,8 @@ void sh4_inst_binary_or_imm_r0(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, 0) |= inst.imm8;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_11001000iiiiiiii 0xff00
@@ -1810,6 +1913,8 @@ void sh4_inst_binary_tst_imm_r0(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] |= flag;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_11001100iiiiiiii 0xff00
@@ -1824,8 +1929,10 @@ void sh4_inst_binary_tstb_imm_r0_gbr(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t addr = *sh4_gen_reg(sh4, 0) + sh4->reg[SH4_REG_GBR];
     uint8_t val;
 
-    if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0)
+    if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0) {
+        sh4_cycle_advance(sh4, SH4_GROUP_CO, 3);
         return;
+    }
 
     sh4->reg[SH4_REG_SR] &= ~SH4_SR_FLAG_T_MASK;
     reg32_t flag = !(inst.imm8 & val) <<
@@ -1833,6 +1940,8 @@ void sh4_inst_binary_tstb_imm_r0_gbr(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] |= flag;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 3);
 }
 
 #define INST_MASK_11001010iiiiiiii 0xff00
@@ -1847,6 +1956,8 @@ void sh4_inst_binary_xor_imm_r0(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, 0) ^= inst.imm8;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_11001110iiiiiiii 0xff00
@@ -1862,14 +1973,17 @@ void sh4_inst_binary_xorb_imm_r0_gbr(Sh4 *sh4, Sh4OpArgs inst) {
     uint8_t val;
 
     if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     val ^= inst.imm8;
 
     if (sh4_write_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 4);
 }
 
 #define INST_MASK_10001011dddddddd 0xff00
@@ -1889,6 +2003,8 @@ void sh4_inst_unary_bf_disp(Sh4 *sh4, Sh4OpArgs inst) {
     } else {
         sh4_next_inst(sh4);
     }
+
+    sh4_cycle_advance(sh4, SH4_GROUP_BR, 1);
 }
 
 #define INST_MASK_10001111dddddddd 0xff00
@@ -1906,6 +2022,8 @@ void sh4_inst_unary_bfs_disp(Sh4 *sh4, Sh4OpArgs inst) {
     }
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_BR, 1);
 }
 
 #define INST_MASK_10001001dddddddd 0xff00
@@ -1925,6 +2043,8 @@ void sh4_inst_unary_bt_disp(Sh4 *sh4, Sh4OpArgs inst) {
     } else {
         sh4_next_inst(sh4);
     }
+
+    sh4_cycle_advance(sh4, SH4_GROUP_BR, 1);
 }
 
 #define INST_MASK_10001101dddddddd 0xff00
@@ -1942,6 +2062,8 @@ void sh4_inst_unary_bts_disp(Sh4 *sh4, Sh4OpArgs inst) {
     }
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_BR, 1);
 }
 
 #define INST_MASK_1010dddddddddddd 0xf000
@@ -1957,6 +2079,8 @@ void sh4_inst_unary_bra_disp(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->delayed_branch_addr = sh4->reg[SH4_REG_PC] + (((int32_t)inst.simm12) << 1) + 4;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_BR, 1);
 }
 
 #define INST_MASK_1011dddddddddddd 0xf000
@@ -1973,6 +2097,8 @@ void sh4_inst_unary_bsr_disp(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->delayed_branch = true;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_BR, 1);
 }
 
 #define INST_MASK_11000011iiiiiiii 0xff00
@@ -1992,9 +2118,12 @@ void sh4_inst_unary_trapa_disp(Sh4 *sh4, Sh4OpArgs inst) {
      */
     if (dc_debugger_enabled()) {
         debug_on_softbreak(inst.inst, sh4->reg[SH4_REG_PC]);
+        sh4_cycle_advance(sh4, SH4_GROUP_CO, 7);
         return;
     }
 #endif /* ifdef ENABLE_DEBUGGER */
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 7);
 
     error_set_feature("opcode implementation");
     error_set_opcode_format("11000011iiiiiiii");
@@ -2016,16 +2145,19 @@ void sh4_inst_unary_tasb_gen(Sh4 *sh4, Sh4OpArgs inst) {
     reg32_t mask;
 
     if (sh4_read_mem(sh4, &val_old, addr, sizeof(val_old)) != 0)
-        return;
+        goto cycle_advance;
     val_new = val_old | 0x80;
     if (sh4_write_mem(sh4, &val_new, addr, sizeof(val_new)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4->reg[SH4_REG_SR] &= ~SH4_SR_FLAG_T_MASK;
     mask = (!val_old) << SH4_SR_FLAG_T_SHIFT;
     sh4->reg[SH4_REG_SR] |= mask;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 5);
 }
 
 #define INST_MASK_0000nnnn10010011 0xf0ff
@@ -2040,6 +2172,8 @@ void sh4_inst_unary_ocbi_indgen(Sh4 *sh4, Sh4OpArgs inst) {
     /* TODO: if mmu is enabled, this inst can generate exceptions */
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0000nnnn10100011 0xf0ff
@@ -2054,6 +2188,8 @@ void sh4_inst_unary_ocbp_indgen(Sh4 *sh4, Sh4OpArgs inst) {
     /* TODO: if mmu is enabled, this inst can generate exceptions */
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0000nnnn10110011 0xf0ff
@@ -2068,6 +2204,8 @@ void sh4_inst_unary_ocbwb_indgen(Sh4 *sh4, Sh4OpArgs inst) {
     /* TODO: if mmu is enabled, this inst can generate exceptions */
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0000nnnn10000011 0xf0ff
@@ -2086,6 +2224,8 @@ void sh4_inst_unary_pref_indgen(Sh4 *sh4, Sh4OpArgs inst) {
         sh4_sq_pref(sh4, addr);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0100nnnn00101011 0xf0ff
@@ -2101,6 +2241,8 @@ void sh4_inst_unary_jmp_indgen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->delayed_branch = true;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0100nnnn00001011 0xf0ff
@@ -2117,6 +2259,8 @@ void sh4_inst_unary_jsr_indgen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->delayed_branch = true;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0100mmmm00001110 0xf0ff
@@ -2142,6 +2286,8 @@ void sh4_inst_binary_ldc_gen_sr(Sh4 *sh4, Sh4OpArgs inst) {
     sh4_on_sr_change(sh4, old_sr);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 4);
 }
 
 #define INST_MASK_0100mmmm00011110 0xf0ff
@@ -2156,6 +2302,8 @@ void sh4_inst_binary_ldc_gen_gbr(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_GBR] = *sh4_gen_reg(sh4, inst.gen_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 3);
 }
 
 #define INST_MASK_0100mmmm00101110 0xf0ff
@@ -2179,6 +2327,8 @@ void sh4_inst_binary_ldc_gen_vbr(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_VBR] = *sh4_gen_reg(sh4, inst.gen_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm00111110 0xf0ff
@@ -2202,6 +2352,8 @@ void sh4_inst_binary_ldc_gen_ssr(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SSR] = *sh4_gen_reg(sh4, inst.gen_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm01001110 0xf0ff
@@ -2225,6 +2377,8 @@ void sh4_inst_binary_ldc_gen_spc(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SPC] = *sh4_gen_reg(sh4, inst.gen_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm11111010 0xf0ff
@@ -2248,6 +2402,8 @@ void sh4_inst_binary_ldc_gen_dbr(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_DBR] = *sh4_gen_reg(sh4, inst.gen_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0000nnnn00000010 0xf0ff
@@ -2271,6 +2427,8 @@ void sh4_inst_binary_stc_sr_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.gen_reg) = sh4->reg[SH4_REG_SR];
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0000nnnn00010010 0xf0ff
@@ -2285,6 +2443,8 @@ void sh4_inst_binary_stc_gbr_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.gen_reg) = sh4->reg[SH4_REG_GBR];
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0000nnnn00100010 0xf0ff
@@ -2308,6 +2468,8 @@ void sh4_inst_binary_stc_vbr_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.gen_reg) = sh4->reg[SH4_REG_VBR];
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0000nnnn00110010 0xf0ff
@@ -2331,6 +2493,8 @@ void sh4_inst_binary_stc_ssr_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.gen_reg) = sh4->reg[SH4_REG_SSR];
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0000nnnn01000010 0xf0ff
@@ -2354,6 +2518,8 @@ void sh4_inst_binary_stc_spc_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.gen_reg) = sh4->reg[SH4_REG_SPC];
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0000nnnn00111010 0xf0ff
@@ -2377,6 +2543,8 @@ void sh4_inst_binary_stc_sgr_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.gen_reg) = sh4->reg[SH4_REG_SGR];
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 3);
 }
 
 #define INST_MASK_0000nnnn11111010 0xf0ff
@@ -2400,6 +2568,8 @@ void sh4_inst_binary_stc_dbr_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.gen_reg) = sh4->reg[SH4_REG_DBR];
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0100mmmm00000111 0xf0ff
@@ -2425,7 +2595,7 @@ void sh4_inst_binary_ldcl_indgeninc_sr(Sh4 *sh4, Sh4OpArgs inst) {
 
     src_reg = sh4_gen_reg(sh4, inst.gen_reg);
     if (sh4_read_mem(sh4, &val, *src_reg, sizeof(val)) != 0) {
-        return;
+        goto cycle_advance;
     }
 
     (*src_reg) += 4;
@@ -2434,6 +2604,9 @@ void sh4_inst_binary_ldcl_indgeninc_sr(Sh4 *sh4, Sh4OpArgs inst) {
     sh4_on_sr_change(sh4, old_sr_val);
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 4);
 }
 
 #define INST_MASK_0100mmmm00010111 0xf0ff
@@ -2450,13 +2623,15 @@ void sh4_inst_binary_ldcl_indgeninc_gbr(Sh4 *sh4, Sh4OpArgs inst) {
 
     src_reg = sh4_gen_reg(sh4, inst.gen_reg);
     if (sh4_read_mem(sh4, &val, *src_reg, sizeof(val)) != 0) {
-        return;
+        goto cycle_advance;
     }
 
     (*src_reg) += 4;
     sh4->reg[SH4_REG_GBR] = val;
 
     sh4_next_inst(sh4);
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 3);
 }
 
 #define INST_MASK_0100mmmm00100111 0xf0ff
@@ -2482,13 +2657,16 @@ void sh4_inst_binary_ldcl_indgeninc_vbr(Sh4 *sh4, Sh4OpArgs inst) {
 
     src_reg = sh4_gen_reg(sh4, inst.gen_reg);
     if (sh4_read_mem(sh4, &val, *src_reg, sizeof(val)) != 0) {
-        return;
+        goto cycle_advance;
     }
 
     (*src_reg) += 4;
     sh4->reg[SH4_REG_VBR] = val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm00110111 0xf0ff
@@ -2514,13 +2692,16 @@ void sh4_inst_binary_ldcl_indgenic_ssr(Sh4 *sh4, Sh4OpArgs inst) {
 
     src_reg = sh4_gen_reg(sh4, inst.gen_reg);
     if (sh4_read_mem(sh4, &val, *src_reg, sizeof(val)) != 0) {
-        return;
+        goto cycle_advance;
     }
 
     (*src_reg) += 4;
     sh4->reg[SH4_REG_SSR] = val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm01000111 0xf0ff
@@ -2546,13 +2727,16 @@ void sh4_inst_binary_ldcl_indgeninc_spc(Sh4 *sh4, Sh4OpArgs inst) {
 
     src_reg = sh4_gen_reg(sh4, inst.gen_reg);
     if (sh4_read_mem(sh4, &val, *src_reg, sizeof(val)) != 0) {
-        return;
+        goto cycle_advance;
     }
 
     (*src_reg) += 4;
     sh4->reg[SH4_REG_SPC] = val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm11110110 0xf0ff
@@ -2578,13 +2762,16 @@ void sh4_inst_binary_ldcl_indgeninc_dbr(Sh4 *sh4, Sh4OpArgs inst) {
 
     src_reg = sh4_gen_reg(sh4, inst.gen_reg);
     if (sh4_read_mem(sh4, &val, *src_reg, sizeof(val)) != 0) {
-        return;
+        goto cycle_advance;
     }
 
     (*src_reg) += 4;
     sh4->reg[SH4_REG_DBR] = val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100nnnn00000011 0xf0ff
@@ -2609,11 +2796,14 @@ void sh4_inst_binary_stcl_sr_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t addr = *regp - 4;
     if (sh4_write_mem(sh4, &sh4->reg[SH4_REG_SR], addr,
                        sizeof(sh4->reg[SH4_REG_SR])) != 0)
-        return;
+        goto cycle_advance;
 
     *regp = addr;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0100nnnn00010011 0xf0ff
@@ -2629,11 +2819,14 @@ void sh4_inst_binary_stcl_gbr_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t addr = *regp - 4;
     if (sh4_write_mem(sh4, &sh4->reg[SH4_REG_GBR], addr,
                        sizeof(sh4->reg[SH4_REG_GBR])) != 0)
-        return;
+        goto cycle_advance;
 
     *regp = addr;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0100nnnn00100011 0xf0ff
@@ -2658,11 +2851,13 @@ void sh4_inst_binary_stcl_vbr_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t addr = *regp - 4;
     if (sh4_write_mem(sh4, &sh4->reg[SH4_REG_VBR], addr,
                        sizeof(sh4->reg[SH4_REG_VBR])) != 0)
-        return;
+        goto cycle_advance;
 
     *regp = addr;
 
     sh4_next_inst(sh4);
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0100nnnn00110011 0xf0ff
@@ -2687,11 +2882,14 @@ void sh4_inst_binary_stcl_ssr_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t addr = *regp - 4;
     if (sh4_write_mem(sh4, &sh4->reg[SH4_REG_SSR], addr,
                        sizeof(sh4->reg[SH4_REG_SSR])) != 0)
-        return;
+        goto cycle_advance;
 
     *regp = addr;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0100nnnn01000011 0xf0ff
@@ -2716,11 +2914,14 @@ void sh4_inst_binary_stcl_spc_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t addr = *regp - 4;
     if (sh4_write_mem(sh4, &sh4->reg[SH4_REG_SPC], addr,
                        sizeof(sh4->reg[SH4_REG_SPC])) != 0)
-        return;
+        goto cycle_advance;
 
     *regp = addr;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0100nnnn00110010 0xf0ff
@@ -2745,11 +2946,14 @@ void sh4_inst_binary_stcl_sgr_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t addr = *regp - 4;
     if (sh4_write_mem(sh4, &sh4->reg[SH4_REG_SGR], addr,
                        sizeof(sh4->reg[SH4_REG_SGR])) != 0)
-        return;
+        goto cycle_advance;
 
     *regp = addr;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 3);
 }
 
 #define INST_MASK_0100nnnn11110010 0xf0ff
@@ -2774,11 +2978,14 @@ void sh4_inst_binary_stcl_dbr_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t addr = *regp - 4;
     if (sh4_write_mem(sh4, &sh4->reg[SH4_REG_DBR], addr,
                        sizeof(sh4->reg[SH4_REG_DBR])) != 0)
-        return;
+        goto cycle_advance;
 
     *regp = addr;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_1110nnnniiiiiiii 0xf000
@@ -2793,6 +3000,8 @@ void sh4_inst_binary_mov_imm_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.gen_reg) = (int32_t)((int8_t)inst.imm8);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0111nnnniiiiiiii 0xf000
@@ -2807,6 +3016,8 @@ void sh4_inst_binary_add_imm_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.gen_reg) += (int32_t)((int8_t)(inst.imm8));
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_1001nnnndddddddd 0xf000
@@ -2823,10 +3034,13 @@ void sh4_inst_binary_movw_binind_disp_pc_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int16_t mem_in;
 
     if (sh4_read_mem(sh4, &mem_in, addr, sizeof(mem_in)) != 0)
-        return;
+        goto cycle_advance;
     *sh4_gen_reg(sh4, reg_no) = (int32_t)mem_in;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1101nnnndddddddd 0xf000
@@ -2843,10 +3057,13 @@ void sh4_inst_binary_movl_binind_disp_pc_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int32_t mem_in;
 
     if (sh4_read_mem(sh4, &mem_in, addr, sizeof(mem_in)) != 0)
-        return;
+        goto cycle_advance;
     *sh4_gen_reg(sh4, reg_no) = mem_in;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0110nnnnmmmm0011 0xf00f
@@ -2861,6 +3078,8 @@ void sh4_inst_binary_movw_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) = *sh4_gen_reg(sh4, inst.src_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_0110nnnnmmmm1000 0xf00f
@@ -2884,6 +3103,8 @@ void sh4_inst_binary_swapb_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) = val_src;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0110nnnnmmmm1001 0xf00f
@@ -2906,6 +3127,8 @@ void sh4_inst_binary_swapw_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) = val_src;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0010nnnnmmmm1101 0xf00f
@@ -2924,6 +3147,8 @@ void sh4_inst_binary_xtrct_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
         (((*reg_src) & 0x0000ffff) << 16);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0011nnnnmmmm1100 0xf00f
@@ -2938,6 +3163,8 @@ void sh4_inst_binary_add_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) += *sh4_gen_reg(sh4, inst.src_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0011nnnnmmmm1110 0xf00f
@@ -2971,6 +3198,8 @@ void sh4_inst_binary_addc_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *dst_reg = in_dst;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0011nnnnmmmm1111 0xf00f
@@ -3011,6 +3240,8 @@ void sh4_inst_binary_addv_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *dst_reg = in_dst;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0011nnnnmmmm0000 0xf00f
@@ -3027,6 +3258,8 @@ void sh4_inst_binary_cmpeq_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
                SH4_SR_FLAG_T_SHIFT);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_0011nnnnmmmm0010 0xf00f
@@ -3044,6 +3277,8 @@ void sh4_inst_binary_cmphs_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] |= ((lhs >= rhs) << SH4_SR_FLAG_T_SHIFT);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_0011nnnnmmmm0011 0xf00f
@@ -3061,6 +3296,8 @@ void sh4_inst_binary_cmpge_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] |= ((lhs >= rhs) << SH4_SR_FLAG_T_SHIFT);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_0011nnnnmmmm0110 0xf00f
@@ -3078,6 +3315,8 @@ void sh4_inst_binary_cmphi_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] |= ((lhs > rhs) << SH4_SR_FLAG_T_SHIFT);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_0011nnnnmmmm0111 0xf00f
@@ -3095,6 +3334,8 @@ void sh4_inst_binary_cmpgt_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] |= ((lhs > rhs) << SH4_SR_FLAG_T_SHIFT);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_0010nnnnmmmm1100 0xf00f
@@ -3119,6 +3360,8 @@ void sh4_inst_binary_cmpstr_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] |= flag << SH4_SR_FLAG_T_SHIFT;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_0011nnnnmmmm0100 0xf00f
@@ -3216,6 +3459,8 @@ void sh4_inst_binary_div1_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *dividend_p = dividend;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0010nnnnmmmm0111 0xf00f
@@ -3242,6 +3487,8 @@ void sh4_inst_binary_div0s_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
         (new_t << SH4_SR_FLAG_T_SHIFT);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0000000000011001 0xffff
@@ -3257,6 +3504,8 @@ void sh4_inst_noarg_div0u(Sh4 *sh4, Sh4OpArgs inst) {
         ~(SH4_SR_M_MASK | SH4_SR_Q_MASK | SH4_SR_FLAG_T_MASK);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0011nnnnmmmm1101 0xf00f
@@ -3276,6 +3525,8 @@ void sh4_inst_binary_dmulsl_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_MACL] = ((uint64_t)res) & 0xffffffff;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0011nnnnmmmm0101 0xf00f
@@ -3295,6 +3546,8 @@ void sh4_inst_binary_dmulul_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_MACL] = res & 0xffffffff;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0110nnnnmmmm1110 0xf00f
@@ -3310,6 +3563,8 @@ void sh4_inst_binary_extsb_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) = (int32_t)((int8_t)(src_val & 0xff));
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0110nnnnmmmm1111 0xf00f
@@ -3325,6 +3580,8 @@ void sh4_inst_binary_extsw_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) = (int32_t)((int16_t)(src_val & 0xffff));
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0110nnnnmmmm1100 0xf00f
@@ -3340,6 +3597,8 @@ void sh4_inst_binary_extub_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) = src_val & 0xff;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0110nnnnmmmm1101 0xf00f
@@ -3355,6 +3614,8 @@ void sh4_inst_binary_extuw_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) = src_val & 0xffff;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0000nnnnmmmm0111 0xf00f
@@ -3369,6 +3630,8 @@ void sh4_inst_binary_mull_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_MACL] = *sh4_gen_reg(sh4, inst.dst_reg) * *sh4_gen_reg(sh4, inst.src_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0010nnnnmmmm1111 0xf00f
@@ -3386,6 +3649,8 @@ void sh4_inst_binary_mulsw_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_MACL] = (int32_t)lhs * (int32_t)rhs;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0010nnnnmmmm1110 0xf00f
@@ -3403,6 +3668,8 @@ void sh4_inst_binary_muluw_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_MACL] = (uint32_t)lhs * (uint32_t)rhs;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0110nnnnmmmm1011 0xf00f
@@ -3417,6 +3684,8 @@ void sh4_inst_binary_neg_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) = -*sh4_gen_reg(sh4, inst.src_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0110nnnnmmmm1010 0xf00f
@@ -3440,6 +3709,8 @@ void sh4_inst_binary_negc_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) = dst;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0011nnnnmmmm1000 0xf00f
@@ -3454,6 +3725,8 @@ void sh4_inst_binary_sub_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) -= *sh4_gen_reg(sh4, inst.src_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0011nnnnmmmm1010 0xf00f
@@ -3487,6 +3760,8 @@ void sh4_inst_binary_subc_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *dst_reg = in_dst;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0011nnnnmmmm1011 0xf00f
@@ -3519,6 +3794,8 @@ void sh4_inst_binary_subv_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *dst_reg = in_dst;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0010nnnnmmmm1001 0xf00f
@@ -3533,6 +3810,8 @@ void sh4_inst_binary_and_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) &= *sh4_gen_reg(sh4, inst.src_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0110nnnnmmmm0111 0xf00f
@@ -3547,6 +3826,8 @@ void sh4_inst_binary_not_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) = ~(*sh4_gen_reg(sh4, inst.src_reg));
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0010nnnnmmmm1011 0xf00f
@@ -3561,6 +3842,8 @@ void sh4_inst_binary_or_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) |= *sh4_gen_reg(sh4, inst.src_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0010nnnnmmmm1000 0xf00f
@@ -3578,6 +3861,8 @@ void sh4_inst_binary_tst_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_SR] |= flag;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_MT, 1);
 }
 
 #define INST_MASK_0010nnnnmmmm1010 0xf00f
@@ -3592,6 +3877,8 @@ void sh4_inst_binary_xor_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.dst_reg) ^= *sh4_gen_reg(sh4, inst.src_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnnmmmm1100 0xf00f
@@ -3617,6 +3904,8 @@ void sh4_inst_binary_shad_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *dstp = dst;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100nnnnmmmm1101 0xf00f
@@ -3642,6 +3931,8 @@ void sh4_inst_binary_shld_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *dstp = dst;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0100mmmm1nnn1110 0xf08f
@@ -3665,6 +3956,8 @@ void sh4_inst_binary_ldc_gen_bank(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_bank_reg(sh4, inst.bank_reg) = *sh4_gen_reg(sh4, inst.gen_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm1nnn0111 0xf08f
@@ -3690,13 +3983,16 @@ void sh4_inst_binary_ldcl_indgeninc_bank(Sh4 *sh4, Sh4OpArgs inst) {
 
     src_reg = sh4_gen_reg(sh4, inst.gen_reg);
     if (sh4_read_mem(sh4, &val, *src_reg, sizeof(val)) != 0) {
-        return;
+        goto cycle_advance;
     }
 
     (*src_reg) += 4;
     *sh4_bank_reg(sh4, inst.bank_reg) = val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0000nnnn1mmm0010 0xf08f
@@ -3720,6 +4016,8 @@ void sh4_inst_binary_stc_bank_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.gen_reg) = *sh4_bank_reg(sh4, inst.bank_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0100nnnn1mmm0011 0xf08f
@@ -3745,11 +4043,14 @@ void sh4_inst_binary_stcl_bank_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t addr = *addr_reg - 4;
 
     if (sh4_write_mem(sh4, &src_val, addr, sizeof(src_val)) != 0)
-        return;
+        goto cycle_advance;
 
     *addr_reg = addr;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0100mmmm00001010 0xf0ff
@@ -3764,6 +4065,8 @@ void sh4_inst_binary_lds_gen_mach(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_MACH] = *sh4_gen_reg(sh4, inst.gen_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm00011010 0xf0ff
@@ -3778,6 +4081,8 @@ void sh4_inst_binary_lds_gen_macl(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_MACL] = *sh4_gen_reg(sh4, inst.gen_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0000nnnn00001010 0xf0ff
@@ -3792,6 +4097,8 @@ void sh4_inst_binary_sts_mach_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.gen_reg) = sh4->reg[SH4_REG_MACH];
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0000nnnn00011010 0xf0ff
@@ -3806,6 +4113,8 @@ void sh4_inst_binary_sts_macl_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.gen_reg) = sh4->reg[SH4_REG_MACL];
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm00101010 0xf0ff
@@ -3820,6 +4129,8 @@ void sh4_inst_binary_lds_gen_pr(Sh4 *sh4, Sh4OpArgs inst) {
     sh4->reg[SH4_REG_PR] = *sh4_gen_reg(sh4, inst.gen_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0000nnnn00101010 0xf0ff
@@ -3834,6 +4145,8 @@ void sh4_inst_binary_sts_pr_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.gen_reg) = sh4->reg[SH4_REG_PR];
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0100mmmm00000110 0xf0ff
@@ -3849,13 +4162,16 @@ void sh4_inst_binary_ldsl_indgeninc_mach(Sh4 *sh4, Sh4OpArgs inst) {
     reg32_t *addr_reg = sh4_gen_reg(sh4, inst.gen_reg);
 
     if (sh4_read_mem(sh4, &val, *addr_reg, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4->reg[SH4_REG_MACH] = val;
 
     *addr_reg += 4;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm00010110 0xf0ff
@@ -3871,13 +4187,16 @@ void sh4_inst_binary_ldsl_indgeninc_macl(Sh4 *sh4, Sh4OpArgs inst) {
     reg32_t *addr_reg = sh4_gen_reg(sh4, inst.gen_reg);
 
     if (sh4_read_mem(sh4, &val, *addr_reg, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4->reg[SH4_REG_MACL] = val;
 
     *addr_reg += 4;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm00000010 0xf0ff
@@ -3893,11 +4212,14 @@ void sh4_inst_binary_stsl_mach_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t addr = *addr_reg - 4;
 
     if (sh4_write_mem(sh4, &sh4->reg[SH4_REG_MACH], addr, sizeof(sh4->reg[SH4_REG_MACH])) != 0)
-        return;
+        goto cycle_advance;
 
     *addr_reg = addr;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm00010010 0xf0ff
@@ -3913,11 +4235,14 @@ void sh4_inst_binary_stsl_macl_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t addr = *addr_reg - 4;
 
     if (sh4_write_mem(sh4, &sh4->reg[SH4_REG_MACL], addr, sizeof(sh4->reg[SH4_REG_MACL])) != 0)
-        return;
+        goto cycle_advance;
 
     *addr_reg = addr;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm00100110 0xf0ff
@@ -3933,13 +4258,16 @@ void sh4_inst_binary_ldsl_indgeninc_pr(Sh4 *sh4, Sh4OpArgs inst) {
     reg32_t *addr_reg = sh4_gen_reg(sh4, inst.gen_reg);
 
     if (sh4_read_mem(sh4, &val, *addr_reg, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4->reg[SH4_REG_PR] = val;
 
     *addr_reg += 4;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0100nnnn00100010 0xf0ff
@@ -3955,11 +4283,14 @@ void sh4_inst_binary_stsl_pr_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t addr = *addr_reg - 4;
 
     if (sh4_write_mem(sh4, &sh4->reg[SH4_REG_PR], addr, sizeof(sh4->reg[SH4_REG_PR])) != 0)
-        return;
+        goto cycle_advance;
 
     *addr_reg = addr;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0010nnnnmmmm0000 0xf00f
@@ -3975,9 +4306,12 @@ void sh4_inst_binary_movb_gen_indgen(Sh4 *sh4, Sh4OpArgs inst) {
     uint8_t mem_val = *sh4_gen_reg(sh4, inst.src_reg);
 
     if (sh4_write_mem(sh4, &mem_val, addr, sizeof(mem_val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0010nnnnmmmm0001 0xf00f
@@ -3993,9 +4327,12 @@ void sh4_inst_binary_movw_gen_indgen(Sh4 *sh4, Sh4OpArgs inst) {
     uint16_t mem_val = *sh4_gen_reg(sh4, inst.src_reg);
 
     if (sh4_write_mem(sh4, &mem_val, addr, sizeof(mem_val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0010nnnnmmmm0010 0xf00f
@@ -4011,9 +4348,12 @@ void sh4_inst_binary_movl_gen_indgen(Sh4 *sh4, Sh4OpArgs inst) {
     uint32_t mem_val = *sh4_gen_reg(sh4, inst.src_reg);
 
     if (sh4_write_mem(sh4, &mem_val, addr, sizeof(mem_val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0110nnnnmmmm0000 0xf00f
@@ -4029,11 +4369,14 @@ void sh4_inst_binary_movb_indgen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int8_t mem_val;
 
     if (sh4_read_mem(sh4, &mem_val, addr, sizeof(mem_val)) != 0)
-        return;
+        goto cycle_advance;
 
     *sh4_gen_reg(sh4, inst.dst_reg) = (int32_t)mem_val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0110nnnnmmmm0001 0xf00f
@@ -4049,11 +4392,14 @@ void sh4_inst_binary_movw_indgen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int16_t mem_val;
 
     if (sh4_read_mem(sh4, &mem_val, addr, sizeof(mem_val)) != 0)
-        return;
+        goto cycle_advance;
 
     *sh4_gen_reg(sh4, inst.dst_reg) = (int32_t)mem_val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0110nnnnmmmm0010 0xf00f
@@ -4069,11 +4415,14 @@ void sh4_inst_binary_movl_indgen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int32_t mem_val;
 
     if (sh4_read_mem(sh4, &mem_val, addr, sizeof(mem_val)) != 0)
-        return;
+        goto cycle_advance;
 
     *sh4_gen_reg(sh4, inst.dst_reg) = mem_val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0010nnnnmmmm0100 0xf00f
@@ -4093,11 +4442,14 @@ void sh4_inst_binary_movb_gen_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     val = *src_reg;
 
     if (sh4_write_mem(sh4, &val, dst_reg_val, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     (*dst_reg) = dst_reg_val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0010nnnnmmmm0101 0xf00f
@@ -4118,11 +4470,14 @@ void sh4_inst_binary_movw_gen_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     val = *src_reg;
 
     if (sh4_write_mem(sh4, &val, dst_reg_val, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     *dst_reg = dst_reg_val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0010nnnnmmmm0110 0xf00f
@@ -4143,11 +4498,14 @@ void sh4_inst_binary_movl_gen_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     val = *src_reg;
 
     if (sh4_write_mem(sh4, &val, dst_reg_val, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     *dst_reg = dst_reg_val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0110nnnnmmmm0100 0xf00f
@@ -4164,13 +4522,16 @@ void sh4_inst_binary_movb_indgeninc_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int8_t val;
 
     if (sh4_read_mem(sh4, &val, *src_reg, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     *dst_reg = (int32_t)val;
 
     (*src_reg)++;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0110nnnnmmmm0101 0xf00f
@@ -4187,13 +4548,16 @@ void sh4_inst_binary_movw_indgeninc_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int16_t val;
 
     if (sh4_read_mem(sh4, &val, *src_reg, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     *dst_reg = (int32_t)val;
 
     (*src_reg) += 2;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0110nnnnmmmm0110 0xf00f
@@ -4210,13 +4574,16 @@ void sh4_inst_binary_movl_indgeninc_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int32_t val;
 
     if (sh4_read_mem(sh4, &val, *src_reg, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     *dst_reg = (int32_t)val;
 
     (*src_reg) += 4;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0000nnnnmmmm1111 0xf00f
@@ -4236,7 +4603,7 @@ void sh4_inst_binary_macl_indgeninc_indgeninc(Sh4 *sh4, Sh4OpArgs inst) {
     reg32_t lhs, rhs;
     if (sh4_read_mem(sh4, &lhs, *dst_addrp, sizeof(lhs)) != 0 ||
         sh4_read_mem(sh4, &rhs, *src_addrp, sizeof(rhs)) != 0)
-        return;
+        goto cycle_advance;
 
     int64_t product = (int64_t)((int32_t)lhs) * (int64_t)((int32_t)rhs);
     int64_t sum;
@@ -4272,6 +4639,9 @@ void sh4_inst_binary_macl_indgeninc_indgeninc(Sh4 *sh4, Sh4OpArgs inst) {
     (*src_addrp) += 4;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_0100nnnnmmmm1111 0xf00f
@@ -4291,7 +4661,7 @@ void sh4_inst_binary_macw_indgeninc_indgeninc(Sh4 *sh4, Sh4OpArgs inst) {
     int16_t lhs, rhs;
     if (sh4_read_mem(sh4, &lhs, *dst_addrp, sizeof(lhs)) != 0 ||
         sh4_read_mem(sh4, &rhs, *src_addrp, sizeof(rhs)) != 0)
-        return;
+        goto cycle_advance;
 
     int64_t result = (int64_t)lhs * (int64_t)rhs;
 
@@ -4339,6 +4709,9 @@ void sh4_inst_binary_macw_indgeninc_indgeninc(Sh4 *sh4, Sh4OpArgs inst) {
     (*src_addrp) += 2;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 2);
 }
 
 #define INST_MASK_10000000nnnndddd 0xff00
@@ -4354,9 +4727,12 @@ void sh4_inst_binary_movb_r0_binind_disp_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int8_t val = *sh4_gen_reg(sh4, 0);
 
     if (sh4_write_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_10000001nnnndddd 0xff00
@@ -4372,9 +4748,12 @@ void sh4_inst_binary_movw_r0_binind_disp_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int16_t val = *sh4_gen_reg(sh4, 0);
 
     if (sh4_write_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0001nnnnmmmmdddd 0xf000
@@ -4390,9 +4769,12 @@ void sh4_inst_binary_movl_gen_binind_disp_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int32_t val = *sh4_gen_reg(sh4, inst.base_reg_src);
 
     if (sh4_write_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_10000100mmmmdddd 0xff00
@@ -4408,11 +4790,14 @@ void sh4_inst_binary_movb_binind_disp_gen_r0(Sh4 *sh4, Sh4OpArgs inst) {
     int8_t val;
 
     if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     *sh4_gen_reg(sh4, 0) = (int32_t)val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_10000101mmmmdddd 0xff00
@@ -4428,11 +4813,14 @@ void sh4_inst_binary_movw_binind_disp_gen_r0(Sh4 *sh4, Sh4OpArgs inst) {
     int16_t val;
 
     if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     *sh4_gen_reg(sh4, 0) = (int32_t)val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0101nnnnmmmmdddd 0xf000
@@ -4448,11 +4836,14 @@ void sh4_inst_binary_movl_binind_disp_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int32_t val;
 
     if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     *sh4_gen_reg(sh4, inst.base_reg_dst) = val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0000nnnnmmmm0100 0xf00f
@@ -4468,9 +4859,12 @@ void sh4_inst_binary_movb_gen_binind_r0_gen(Sh4 *sh4, Sh4OpArgs inst) {
     uint8_t val = *sh4_gen_reg(sh4, inst.src_reg);
 
     if (sh4_write_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0000nnnnmmmm0101 0xf00f
@@ -4486,9 +4880,12 @@ void sh4_inst_binary_movw_gen_binind_r0_gen(Sh4 *sh4, Sh4OpArgs inst) {
     uint16_t val = *sh4_gen_reg(sh4, inst.src_reg);
 
     if (sh4_write_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0000nnnnmmmm0110 0xf00f
@@ -4504,9 +4901,12 @@ void sh4_inst_binary_movl_gen_binind_r0_gen(Sh4 *sh4, Sh4OpArgs inst) {
     uint32_t val = *sh4_gen_reg(sh4, inst.src_reg);
 
     if (sh4_write_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0000nnnnmmmm1100 0xf00f
@@ -4522,11 +4922,14 @@ void sh4_inst_binary_movb_binind_r0_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int8_t val;
 
     if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     *sh4_gen_reg(sh4, inst.dst_reg) = (int32_t)val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0000nnnnmmmm1101 0xf00f
@@ -4542,11 +4945,14 @@ void sh4_inst_binary_movw_binind_r0_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int16_t val;
 
     if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     *sh4_gen_reg(sh4, inst.dst_reg) = (int32_t)val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0000nnnnmmmm1110 0xf00f
@@ -4562,11 +4968,14 @@ void sh4_inst_binary_movl_binind_r0_gen_gen(Sh4 *sh4, Sh4OpArgs inst) {
     int32_t val;
 
     if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     *sh4_gen_reg(sh4, inst.dst_reg) = val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_11000000dddddddd 0xff00
@@ -4582,9 +4991,11 @@ void sh4_inst_binary_movb_r0_binind_disp_gbr(Sh4 *sh4, Sh4OpArgs inst) {
     int8_t val = *sh4_gen_reg(sh4, 0);
 
     if (sh4_write_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_11000001dddddddd 0xff00
@@ -4600,9 +5011,12 @@ void sh4_inst_binary_movw_r0_binind_disp_gbr(Sh4 *sh4, Sh4OpArgs inst) {
     int16_t val = *sh4_gen_reg(sh4, 0);
 
     if (sh4_write_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_11000010dddddddd 0xff00
@@ -4618,9 +5032,12 @@ void sh4_inst_binary_movl_r0_binind_disp_gbr(Sh4 *sh4, Sh4OpArgs inst) {
     int32_t val = *sh4_gen_reg(sh4, 0);
 
     if (sh4_write_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_11000100dddddddd 0xff00
@@ -4636,11 +5053,14 @@ void sh4_inst_binary_movb_binind_disp_gbr_r0(Sh4 *sh4, Sh4OpArgs inst) {
     int8_t val;
 
     if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     *sh4_gen_reg(sh4, 0) = (int32_t)val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_11000101dddddddd 0xff00
@@ -4656,11 +5076,14 @@ void sh4_inst_binary_movw_binind_disp_gbr_r0(Sh4 *sh4, Sh4OpArgs inst) {
     int16_t val;
 
     if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     *sh4_gen_reg(sh4, 0) = (int32_t)val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_11000110dddddddd 0xff00
@@ -4676,11 +5099,14 @@ void sh4_inst_binary_movl_binind_disp_gbr_r0(Sh4 *sh4, Sh4OpArgs inst) {
     int32_t val;
 
     if (sh4_read_mem(sh4, &val, addr, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     *sh4_gen_reg(sh4, 0) = val;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_11000111dddddddd 0xff00
@@ -4702,6 +5128,8 @@ void sh4_inst_binary_mova_binind_disp_pc_r0(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, 0) = (inst.imm8 << 2) + (sh4->reg[SH4_REG_PC] & ~3) + 4;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_EX, 1);
 }
 
 #define INST_MASK_0000nnnn11000011 0xf0ff
@@ -4725,9 +5153,12 @@ void sh4_inst_binary_movcal_r0_indgen(Sh4 *sh4, Sh4OpArgs inst) {
     addr32_t vaddr = *sh4_gen_reg(sh4, inst.dst_reg);
 
     if (sh4_write_mem(sh4, &src_val, vaddr, sizeof(src_val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnn10001101 0xf0ff
@@ -4743,6 +5174,8 @@ void sh4_inst_unary_fldi0_fr(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_fpu_fr(sh4, inst.fr_reg) = 0.0f;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnn10011101 0xf0ff
@@ -4758,6 +5191,8 @@ void sh4_inst_unary_fldi1_fr(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_fpu_fr(sh4, inst.fr_reg) = 1.0f;
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnnmmmm1100 0xf00f
@@ -4773,6 +5208,8 @@ void sh4_inst_binary_fmov_fr_fr(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_fpu_fr(sh4, inst.dst_reg) = *sh4_fpu_fr(sh4, inst.src_reg);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnnmmmm1000 0xf00f
@@ -4789,15 +5226,18 @@ void sh4_inst_binary_fmovs_indgen_fr(Sh4 *sh4, Sh4OpArgs inst) {
     float *dst_ptr = sh4_fpu_fr(sh4, inst.dst_reg);
 
     if (sh4_read_mem(sh4, dst_ptr, addr, sizeof(*dst_ptr)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnnmmmm0110 0xf00f
 #define INST_CONS_1111nnnnmmmm0110 0xf006
 
-// FMOV.S @(R0,Rm), FRn
+// FMOV.S @(R0, Rm), FRn
 // 1111nnnnmmmm0110
 void sh4_inst_binary_fmovs_binind_r0_gen_fr(Sh4 *sh4, Sh4OpArgs inst) {
 
@@ -4808,9 +5248,12 @@ void sh4_inst_binary_fmovs_binind_r0_gen_fr(Sh4 *sh4, Sh4OpArgs inst) {
     float *dst_ptr = sh4_fpu_fr(sh4, inst.dst_reg);
 
     if (sh4_read_mem(sh4, dst_ptr, addr, sizeof(*dst_ptr)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnnmmmm1001 0xf00f
@@ -4827,10 +5270,13 @@ void sh4_inst_binary_fmovs_indgeninc_fr(Sh4 *sh4, Sh4OpArgs inst) {
     float *dst_ptr = sh4_fpu_fr(sh4, inst.dst_reg);
 
     if (sh4_read_mem(sh4, dst_ptr, *addr_p, sizeof(*dst_ptr)) != 0)
-        return;
+        goto cycle_advance;
 
     *addr_p += 4;
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnnmmmm1010 0xf00f
@@ -4847,9 +5293,12 @@ void sh4_inst_binary_fmovs_fr_indgen(Sh4 *sh4, Sh4OpArgs inst) {
     float *src_p = sh4_fpu_fr(sh4, inst.src_reg);
 
     if (sh4_write_mem(sh4, src_p, addr, sizeof(*src_p)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnnmmmm1011 0xf00f
@@ -4867,10 +5316,13 @@ void sh4_inst_binary_fmovs_fr_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     float *src_p = sh4_fpu_fr(sh4, inst.src_reg);
 
     if (sh4_write_mem(sh4, src_p, addr, sizeof(*src_p)) != 0)
-        return;
+        goto cycle_advance;
 
     *addr_p = addr;
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnnmmmm0111 0xf00f
@@ -4887,9 +5339,12 @@ void sh4_inst_binary_fmovs_fr_binind_r0_gen(Sh4 *sh4, Sh4OpArgs inst) {
     float *src_p = sh4_fpu_fr(sh4, inst.src_reg);
 
     if (sh4_write_mem(sh4, src_p, addr, sizeof(*src_p)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnn0mmm01100 0xf11f
@@ -4905,6 +5360,8 @@ void sh4_inst_binary_fmov_dr_dr(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_fpu_dr(sh4, inst.dr_dst) = *sh4_fpu_dr(sh4, inst.dr_src);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnn0mmmm1000 0xf10f
@@ -4921,9 +5378,12 @@ void sh4_inst_binary_fmov_indgen_dr(Sh4 *sh4, Sh4OpArgs inst) {
     double *dst_ptr = sh4_fpu_dr(sh4, inst.dr_dst);
 
     if (sh4_read_mem(sh4, dst_ptr, addr, sizeof(*dst_ptr)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnn0mmmm0110 0xf10f
@@ -4940,9 +5400,12 @@ void sh4_inst_binary_fmov_binind_r0_gen_dr(Sh4 *sh4, Sh4OpArgs inst) {
     double *dst_ptr = sh4_fpu_dr(sh4, inst.dr_dst);
 
     if (sh4_read_mem(sh4, dst_ptr, addr, sizeof(*dst_ptr)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnn0mmmm1001 0xf10f
@@ -4959,10 +5422,13 @@ void sh4_inst_binary_fmov_indgeninc_dr(Sh4 *sh4, Sh4OpArgs inst) {
     double *dst_ptr = sh4_fpu_dr(sh4, inst.dr_dst);
 
     if (sh4_read_mem(sh4, dst_ptr, *addr_p, sizeof(*dst_ptr)) != 0)
-        return;
+        goto cycle_advance;
 
     *addr_p += 8;
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnnmmm01010 0xf01f
@@ -4979,9 +5445,12 @@ void sh4_inst_binary_fmov_dr_indgen(Sh4 *sh4, Sh4OpArgs inst) {
     double *src_p = sh4_fpu_dr(sh4, inst.dr_src);
 
     if (sh4_write_mem(sh4, src_p, addr, sizeof(*src_p)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnnmmm01011 0xf01f
@@ -4999,10 +5468,13 @@ void sh4_inst_binary_fmov_dr_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     double *src_p = sh4_fpu_dr(sh4, inst.dr_src);
 
     if (sh4_write_mem(sh4, src_p, addr, sizeof(*src_p)) != 0)
-        return;
+        goto cycle_advance;
 
     *addr_p = addr;
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnnmmm00111 0xf01f
@@ -5019,9 +5491,12 @@ void sh4_inst_binary_fmov_dr_binind_r0_gen(Sh4 *sh4, Sh4OpArgs inst) {
     double *src_p = sh4_fpu_dr(sh4, inst.dr_src);
 
     if (sh4_write_mem(sh4, src_p, addr, sizeof(*src_p)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111mmmm00011101 0xf0ff
@@ -5038,6 +5513,8 @@ void sh4_inst_binary_flds_fr_fpul(Sh4 *sh4, Sh4OpArgs inst) {
     memcpy(sh4->reg + SH4_REG_FPUL, src_reg, sizeof(sh4->reg[SH4_REG_FPUL]));
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnn00001101 0xf0ff
@@ -5054,6 +5531,8 @@ void sh4_inst_binary_fsts_fpul_fr(Sh4 *sh4, Sh4OpArgs inst) {
     memcpy(dst_reg, sh4->reg + SH4_REG_FPUL, sizeof(*dst_reg));
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnn01011101 0xf0ff
@@ -5070,6 +5549,8 @@ void sh4_inst_unary_fabs_fr(Sh4 *sh4, Sh4OpArgs inst) {
     *regp = fabs(*regp);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnnmmmm0000 0xf00f
@@ -5095,7 +5576,7 @@ void sh4_inst_binary_fadd_fr_fr(Sh4 *sh4, Sh4OpArgs inst) {
 
     if (issignaling(src) || issignaling(dst)) {
         sh4_fr_invalid(sh4, inst.fr_dst);
-        return;
+        goto cycle_advance;
     }
 
     int src_class = fpclassify(src);
@@ -5103,17 +5584,23 @@ void sh4_inst_binary_fadd_fr_fr(Sh4 *sh4, Sh4OpArgs inst) {
 
     if (src_class == FP_SUBNORMAL || dst_class == FP_SUBNORMAL) {
         sh4_fpu_error(sh4);
-        return;
+        goto cycle_advance;
     }
 
     if (src_class == FP_INFINITE && dst_class == FP_INFINITE) {
         sh4_fpu_error(sh4);
-        return;
+        goto cycle_advance;
     }
 
 #endif
 
     *dstp = dst + src;
+
+#ifdef SH4_FPU_PEDANTIC
+cycle_advance:
+#endif
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnnnmmmm0100 0xf00f
@@ -5141,13 +5628,18 @@ void sh4_inst_binary_fcmpeq_fr_fr(Sh4 *sh4, Sh4OpArgs inst) {
 
     if (src_class == FP_NAN || dst_class == FP_NAN) {
         sh4_fr_invalid(sh4, inst.fr_dst);
-        return;
+        goto cycle_advance;
     }
 #endif
 
     unsigned t_flag = (dst == src);
     sh4->reg[SH4_REG_SR] &= ~SH4_SR_FLAG_T_MASK;
     sh4->reg[SH4_REG_SR] |= (t_flag << SH4_SR_FLAG_T_SHIFT);
+
+#ifdef SH4_FPU_PEDANTIC
+cycle_advance:
+#endif
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnnnmmmm0101 0xf00f
@@ -5175,13 +5667,18 @@ void sh4_inst_binary_fcmpgt_fr_fr(Sh4 *sh4, Sh4OpArgs inst) {
 
     if (src_class == FP_NAN || dst_class == FP_NAN) {
         sh4_fr_invalid(sh4, inst.fr_dst);
-        return;
+        goto cycle_advance;
     }
 #endif
 
     unsigned t_flag = (dst > src);
     sh4->reg[SH4_REG_SR] &= ~SH4_SR_FLAG_T_MASK;
     sh4->reg[SH4_REG_SR] |= (t_flag << SH4_SR_FLAG_T_SHIFT);
+
+#ifdef SH4_FPU_PEDANTIC
+cycle_advance:
+#endif
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnnnmmmm0011 0xf00f
@@ -5206,7 +5703,7 @@ void sh4_inst_binary_fdiv_fr_fr(Sh4 *sh4, Sh4OpArgs inst) {
 #ifdef SH4_FPU_PEDANTIC
     if (issignaling(src) || issignaling(dst)) {
         sh4_fr_invalid(sh4, inst.fr_dst);
-        return;
+        goto cycle_advance;
     }
 
     int src_class = fpclassify(src);
@@ -5214,12 +5711,12 @@ void sh4_inst_binary_fdiv_fr_fr(Sh4 *sh4, Sh4OpArgs inst) {
 
     if (src_class == FP_SUBNORMAL || dst_class == FP_SUBNORMAL) {
         sh4_fpu_error(sh4);
-        return;
+        goto cycle_advance;
     }
 
     if (src_class == FP_ZERO && dst_class == FP_ZERO) {
         sh4_fr_invalid(sh4, inst.fr_dst);
-        return;
+        goto cycle_advance;
     }
 
     if (src_class == FP_ZERO) {
@@ -5227,12 +5724,17 @@ void sh4_inst_binary_fdiv_fr_fr(Sh4 *sh4, Sh4OpArgs inst) {
             (SH4_FPSCR_FLAG_Z_MASK | SH4_FPSCR_CAUSE_Z_MASK);
         if (sh4->reg[SH4_REG_FPSCR] & SH4_FPSCR_ENABLE_Z_MASK) {
             sh4_set_exception(sh4, SH4_EXCP_FPU);
-            return;
+            goto cycle_advance;
         }
     }
 #endif
 
     *dstp = dst / src;
+
+#ifdef SH4_FPU_PEDANTIC
+cycle_advance:
+#endif
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnnn00101101 0xf0ff
@@ -5250,6 +5752,8 @@ void sh4_inst_binary_float_fpul_fr(Sh4 *sh4, Sh4OpArgs inst) {
     *dst_reg = (float)((int32_t)sh4->reg[SH4_REG_FPUL]);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnnnmmmm1110 0xf00f
@@ -5274,6 +5778,8 @@ void sh4_inst_trinary_fmac_fr0_fr_fr(Sh4 *sh4, Sh4OpArgs inst) {
     in2 = in0 * in1 + in2;
 
     memcpy(sh4->reg + SH4_REG_FR0 + inst.fr_dst, &in2, sizeof(in2));
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnnnmmmm0010 0xf00f
@@ -5298,7 +5804,7 @@ void sh4_inst_binary_fmul_fr_fr(Sh4 *sh4, Sh4OpArgs inst) {
 #ifdef SH4_FPU_PEDANTIC
     if (issignaling(src) || issignaling(dst)) {
         sh4_fr_invalid(sh4, inst.fr_dst);
-        return;
+        goto cycle_advance;
     }
 
     int src_class = fpclassify(src);
@@ -5306,17 +5812,22 @@ void sh4_inst_binary_fmul_fr_fr(Sh4 *sh4, Sh4OpArgs inst) {
 
     if (src_class == FP_SUBNORMAL || dst_class == FP_SUBNORMAL) {
         sh4_fpu_error(sh4);
-        return;
+        goto cycle_advance;
     }
 
     if ((src_class == FP_ZERO && dst_class == FP_INFINITE) ||
         (src_class == FP_INFINITE && dst_class == FP_ZERO)) {
         sh4_fr_invalid(sh4, inst.fr_dst);
-        return;
+        goto cycle_advance;
     }
 #endif
 
     *dstp = src * dst;
+
+#ifdef SH4_FPU_PEDANTIC
+cycle_advance:
+#endif
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnnn01001101 0xf0ff
@@ -5331,6 +5842,8 @@ void sh4_inst_unary_fneg_fr(Sh4 *sh4, Sh4OpArgs inst) {
 
     *sh4_fpu_fr(sh4, inst.fr_reg) = -*sh4_fpu_fr(sh4, inst.fr_reg);
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnn01101101 0xf0ff
@@ -5354,6 +5867,8 @@ void sh4_inst_unary_fsqrt_fr(Sh4 *sh4, Sh4OpArgs inst) {
     float out = sqrt(in);
 
     memcpy(sh4->reg + SH4_REG_FR0 + inst.fr_reg, &out, sizeof(out));
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnnnmmmm0001 0xf00f
@@ -5379,7 +5894,7 @@ void sh4_inst_binary_fsub_fr_fr(Sh4 *sh4, Sh4OpArgs inst) {
 
     if (issignaling(src) || issignaling(dst)) {
         sh4_fr_invalid(sh4, inst.fr_dst);
-        return;
+        goto cycle_advance;
     }
 
     int src_class = fpclassify(src);
@@ -5387,17 +5902,22 @@ void sh4_inst_binary_fsub_fr_fr(Sh4 *sh4, Sh4OpArgs inst) {
 
     if (src_class == FP_SUBNORMAL || dst_class == FP_SUBNORMAL) {
         sh4_fpu_error(sh4);
-        return;
+        goto cycle_advance;
     }
 
     if (src_class == FP_INFINITE && dst_class == FP_INFINITE) {
         sh4_fpu_error(sh4);
-        return;
+        goto cycle_advance;
     }
 
 #endif
 
     *dstp = dst - src;
+
+#ifdef SH4_FPU_PEDANTIC
+cycle_advance:
+#endif
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111mmmm00111101 0xf0ff
@@ -5429,6 +5949,8 @@ void sh4_inst_binary_ftrc_fr_fpul(Sh4 *sh4, Sh4OpArgs inst) {
     memcpy(sh4->reg + SH4_REG_FPUL, &val_int, sizeof(sh4->reg[SH4_REG_FPUL]));
 
     fesetround(round_mode);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnn001011101 0xf1ff
@@ -5445,6 +5967,8 @@ void sh4_inst_unary_fabs_dr(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("1111nnn001011101");
     error_set_opcode_name("FABS DRn");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnn0mmm00000 0xf11f
@@ -5461,6 +5985,8 @@ void sh4_inst_binary_fadd_dr_dr(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("1111nnn0mmm00000");
     error_set_opcode_name("FADD DRm, DRn");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnn0mmm00100 0xf11f
@@ -5477,6 +6003,8 @@ void sh4_inst_binary_fcmpeq_dr_dr(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("1111nnn0mmm00100");
     error_set_opcode_name("FCMP/EQ DRm, DRn");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnn0mmm00101 0xf11f
@@ -5493,6 +6021,8 @@ void sh4_inst_binary_fcmpgt_dr_dr(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("1111nnn0mmm00101");
     error_set_opcode_name("FCMP/GT DRm, DRn");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnn0mmm00011 0xf11f
@@ -5509,6 +6039,8 @@ void sh4_inst_binary_fdiv_dr_dr(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("1111nnn0mmm00011");
     error_set_opcode_name("FDIV DRm, DRn");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111mmm010111101 0xf1ff
@@ -5533,6 +6065,8 @@ void sh4_inst_binary_fcnvds_dr_fpul(Sh4 *sh4, Sh4OpArgs inst) {
     float out_val = in_val;
 
     memcpy(sh4->reg + SH4_REG_FPUL, &out_val, sizeof(sh4->reg[SH4_REG_FPUL]));
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnn010101101 0xf1ff
@@ -5558,6 +6092,8 @@ void sh4_inst_binary_fcnvsd_fpul_dr(Sh4 *sh4, Sh4OpArgs inst) {
     double out_val = in_val;
 
     *sh4_fpu_dr(sh4, inst.dr_reg) = out_val;
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnn000101101 0xf1ff
@@ -5575,6 +6111,8 @@ void sh4_inst_binary_float_fpul_dr(Sh4 *sh4, Sh4OpArgs inst) {
     *dst_reg = (double)((int64_t)sh4->reg[SH4_REG_FPUL]);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnn0mmm00010 0xf11f
@@ -5591,6 +6129,8 @@ void sh4_inst_binary_fmul_dr_dr(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("1111nnn0mmm00010");
     error_set_opcode_name("FMUL DRm, DRn");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnn001001101 0xf1ff
@@ -5607,6 +6147,8 @@ void sh4_inst_unary_fneg_dr(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("1111nnn001001101");
     error_set_opcode_name("FNEG DRn");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnn001101101 0xf1ff
@@ -5623,6 +6165,8 @@ void sh4_inst_unary_fsqrt_dr(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("1111nnn001101101");
     error_set_opcode_name("FSQRT DRn");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnn0mmm00001 0xf11f
@@ -5639,6 +6183,8 @@ void sh4_inst_binary_fsub_dr_dr(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("1111nnn0mmm00001");
     error_set_opcode_name("FSUB DRm, DRn");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111mmm000111101 0xf1ff
@@ -5669,6 +6215,8 @@ void sh4_inst_binary_ftrc_dr_fpul(Sh4 *sh4, Sh4OpArgs inst) {
     memcpy(sh4->reg + SH4_REG_FPUL, &val_int, sizeof(sh4->reg[SH4_REG_FPUL]));
 
     fesetround(round_mode);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnn011111101 0xf1ff
@@ -5697,6 +6245,8 @@ void sh4_inst_binary_fsca_fpul_dr(Sh4 *sh4, Sh4OpArgs inst) {
            sizeof(float));
     memcpy(sh4_fpu_fr(sh4, cos_reg_no), sh4_fsca_cos_tbl + angle,
            sizeof(float));
+
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_0100mmmm01101010 0xf0ff
@@ -5711,6 +6261,8 @@ void sh4_inst_binary_lds_gen_fpscr(Sh4 *sh4, Sh4OpArgs inst) {
     sh4_set_fpscr(sh4, *sh4_gen_reg(sh4, inst.gen_reg));
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm01011010 0xf0ff
@@ -5726,6 +6278,8 @@ void sh4_inst_binary_gen_fpul(Sh4 *sh4, Sh4OpArgs inst) {
            sizeof(sh4->reg[SH4_REG_FPUL]));
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0100mmmm01100110 0xf0ff
@@ -5741,13 +6295,16 @@ void sh4_inst_binary_ldsl_indgeninc_fpscr(Sh4 *sh4, Sh4OpArgs inst) {
     reg32_t *addr_reg = sh4_gen_reg(sh4, inst.gen_reg);
 
     if (sh4_read_mem(sh4, &val, *addr_reg, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     sh4_set_fpscr(sh4, val);
 
     *addr_reg += 4;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100mmmm01010110 0xf0ff
@@ -5763,13 +6320,16 @@ void sh4_inst_binary_ldsl_indgeninc_fpul(Sh4 *sh4, Sh4OpArgs inst) {
     reg32_t *addr_reg = sh4_gen_reg(sh4, inst.gen_reg);
 
     if (sh4_read_mem(sh4, &val, *addr_reg, sizeof(val)) != 0)
-        return;
+        goto cycle_advance;
 
     memcpy(sh4->reg + SH4_REG_FPUL, &val, sizeof(sh4->reg[SH4_REG_FPUL]));
 
     *addr_reg += 4;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0000nnnn01101010 0xf0ff
@@ -5784,6 +6344,8 @@ void sh4_inst_binary_sts_fpscr_gen(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_gen_reg(sh4, inst.gen_reg) = sh4->reg[SH4_REG_FPSCR];
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0000nnnn01011010 0xf0ff
@@ -5799,6 +6361,8 @@ void sh4_inst_binary_sts_fpul_gen(Sh4 *sh4, Sh4OpArgs inst) {
            sizeof(sh4->reg[SH4_REG_FPUL]));
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_0100nnnn01100010 0xf0ff
@@ -5815,11 +6379,14 @@ void sh4_inst_binary_stsl_fpscr_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
 
     if (sh4_write_mem(sh4, &sh4->reg[SH4_REG_FPSCR], addr,
                       sizeof(sh4->reg[SH4_REG_FPSCR])) != 0)
-        return;
+        goto cycle_advance;
 
     *addr_reg = addr;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_0100nnnn01010010 0xf0ff
@@ -5836,11 +6403,14 @@ void sh4_inst_binary_stsl_fpul_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
 
     if (sh4_write_mem(sh4, sh4->reg + SH4_REG_FPUL, addr,
                       sizeof(sh4->reg[SH4_REG_FPUL])) != 0)
-        return;
+        goto cycle_advance;
 
     *addr_reg = addr;
 
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_CO, 1);
 }
 
 #define INST_MASK_1111nnn1mmm01100 0xf11f
@@ -5856,6 +6426,8 @@ void sh4_inst_binary_fmov_dr_xd(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_fpu_xd(sh4, inst.dr_dst) = *sh4_fpu_dr(sh4, inst.dr_src);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnn0mmm11100 0xf11f
@@ -5871,6 +6443,8 @@ void sh4_inst_binary_fmov_xd_dr(Sh4 *sh4, Sh4OpArgs inst) {
     *sh4_fpu_dr(sh4, inst.dr_dst) = *sh4_fpu_xd(sh4, inst.dr_src);
 
     sh4_next_inst(sh4);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnn1mmm11100 0xf11f
@@ -5887,6 +6461,8 @@ void sh4_inst_binary_fmov_xd_xd(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("1111nnn1mmm11100");
     error_set_opcode_name("FMOV XDm, XDn");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnn1mmmm1000 0xf10f
@@ -5903,6 +6479,8 @@ void sh4_inst_binary_fmov_indgen_xd(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("1111nnn1mmmm1000");
     error_set_opcode_name("FMOV @Rm, XDn");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnn1mmmm1001 0xf10f
@@ -5919,16 +6497,19 @@ void sh4_inst_binary_fmov_indgeninc_xd(Sh4 *sh4, Sh4OpArgs inst) {
     double *dst_ptr = sh4_fpu_xd(sh4, inst.dr_dst);
 
     if (sh4_read_mem(sh4, dst_ptr, *addr_p, sizeof(*dst_ptr)) != 0)
-        return;
+        goto cycle_advance;
 
     *addr_p += 8;
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnn1mmmm0110 0xf10f
 #define INST_CONS_1111nnn1mmmm0110 0xf106
 
-// FMOV @(R0, Rn), XDn
+// FMOV @(R0, Rm), XDn
 // 1111nnn1mmmm0110
 void sh4_inst_binary_fmov_binind_r0_gen_xd(Sh4 *sh4, Sh4OpArgs inst) {
 
@@ -5939,6 +6520,8 @@ void sh4_inst_binary_fmov_binind_r0_gen_xd(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("1111nnn1mmmm0110");
     error_set_opcode_name("FMOV @(R0, Rn), XDn");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnnmmm11010 0xf01f
@@ -5955,6 +6538,8 @@ void sh4_inst_binary_fmov_xd_indgen(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("1111nnnnmmm11010");
     error_set_opcode_name("FMOV XDm, @Rn");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnnmmm11011 0xf01f
@@ -5972,10 +6557,13 @@ void sh4_inst_binary_fmov_xd_inddecgen(Sh4 *sh4, Sh4OpArgs inst) {
     double *src_p = sh4_fpu_xd(sh4, inst.dr_src);
 
     if (sh4_write_mem(sh4, src_p, addr, sizeof(*src_p)) != 0)
-        return;
+        goto cycle_advance;
 
     *addr_p = addr;
     sh4_next_inst(sh4);
+
+cycle_advance:
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnnnmmm10111 0xf01f
@@ -5992,6 +6580,8 @@ void sh4_inst_binary_fmov_xs_binind_r0_gen(Sh4 *sh4, Sh4OpArgs inst) {
     error_set_opcode_format("1111nnnnmmm10111");
     error_set_opcode_name("FMOV XDm, @(R0, Rn)");
     SH4_INST_RAISE_ERROR(sh4, ERROR_UNIMPLEMENTED);
+
+    sh4_cycle_advance(sh4, SH4_GROUP_LS, 1);
 }
 
 #define INST_MASK_1111nnmm11101101 0xf0ff
@@ -6012,7 +6602,7 @@ void sh4_inst_binary_fipr_fv_fv(Sh4 *sh4, Sh4OpArgs inst) {
                                    SH4_FPSCR_ENABLE_U_MASK |
                                    SH4_FPSCR_ENABLE_I_MASK)) {
         sh4_set_exception(sh4, SH4_EXCP_FPU);
-        return;
+        goto cycle_advance;
     }
     /*
      * TODO:
@@ -6034,6 +6624,11 @@ void sh4_inst_binary_fipr_fv_fv(Sh4 *sh4, Sh4OpArgs inst) {
 
     dst = src1[0] * src2[0] + src1[1] * src2[1] + src1[2] * src2[2] + src1[3] * src2[3];
     memcpy(sh4->reg + SH4_REG_FR0 + reg_dst_idx + 3, &dst, sizeof(dst));
+
+#ifdef SH4_FPU_PEDANTIC
+cycle_advance:
+#endif
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nn0111111101 0xf3ff
@@ -6054,7 +6649,7 @@ void sh4_inst_binary_fitrv_mxtrx_fv(Sh4 *sh4, Sh4OpArgs inst) {
                                    SH4_FPSCR_ENABLE_U_MASK |
                                    SH4_FPSCR_ENABLE_I_MASK)) {
         sh4_set_exception(sh4, SH4_EXCP_FPU);
-        return;
+        goto cycle_advance;
     }
     /*
      * TODO:
@@ -6114,6 +6709,11 @@ void sh4_inst_binary_fitrv_mxtrx_fv(Sh4 *sh4, Sh4OpArgs inst) {
         tmp[3] * row3[3];
 
     memcpy(sh4->reg + reg_idx, tmp_out, sizeof(tmp_out));
+
+#ifdef SH4_FPU_PEDANTIC
+cycle_advance:
+#endif
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 #define INST_MASK_1111nnnn01111101 0xf0ff
@@ -6135,7 +6735,7 @@ void sh4_inst_unary_fsrra_frn(Sh4  *sh4, Sh4OpArgs inst) {
 #ifdef SH4_FPU_PEDANTIC
     if ((src < 0.0f) || issignaling(src)) {
         sh4_fr_invalid(sh4, inst.fr_dst);
-        return;
+        goto cycle_advance;
     }
 
     int class = fpclassify(src);
@@ -6144,7 +6744,7 @@ void sh4_inst_unary_fsrra_frn(Sh4  *sh4, Sh4OpArgs inst) {
         // TODO: do I raise an exception here?
         sh4->reg[SH4_REG_FPSCR] |= (SH4_FPSCR_CAUSE_E_MASK |
                                     SH4_FPSCR_FLAG_E_MASK);
-        return;
+        goto cycle_advance;
     }
 
     sh4->reg[SH4_REG_FPSCR] |= (SH4_FPSCR_ENABLE_I_MASK | SH4_FPSCR_CAUSE_I_MASK);
@@ -6153,6 +6753,10 @@ void sh4_inst_unary_fsrra_frn(Sh4  *sh4, Sh4OpArgs inst) {
 #endif
 
     *srcp = 1.0 / sqrt(src);
+#ifdef SH4_FPU_PEDANTIC
+cycle_advance:
+#endif
+    sh4_cycle_advance(sh4, SH4_GROUP_FE, 1);
 }
 
 void sh4_inst_invalid(Sh4 *sh4, Sh4OpArgs inst) {
