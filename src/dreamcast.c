@@ -341,13 +341,13 @@ static void dreamcast_check_debugger(void) {
 #ifndef ENABLE_DEBUGGER
 static void dc_run_to_next_event(Sh4 *sh4) {
     inst_t inst;
-    InstOpcode const *op;
+    opcode_func_t op_fn;
 
     while (dc_sched_target_stamp > dc_cycle_stamp()) {
         inst = sh4_read_inst(sh4);
-        op = sh4_decode_inst(sh4, inst);
+        op_fn = sh4_decode_inst(sh4, inst);
 
-        sh4_do_exec_inst(sh4, inst, op);
+        sh4_do_exec_inst(sh4, inst, op_fn);
     }
 }
 

@@ -290,7 +290,7 @@ static inline void sh4_periodic(Sh4 *sh4) {
 dc_cycle_stamp_t sh4_get_cycles(void);
 
 // Fetches the given instruction's metadata and returns it.
-static inline InstOpcode const *
+static inline opcode_func_t
 sh4_decode_inst(Sh4 *sh4, inst_t inst) {
     return sh4_inst_lut[inst];
 }
@@ -328,17 +328,16 @@ sh4_count_inst_cycles(Sh4 *sh4, sh4_inst_group_t group, unsigned issue) {
 }
 
 static inline void
-sh4_do_exec_inst(Sh4 *sh4, inst_t inst, InstOpcode const *op) {
+sh4_do_exec_inst(Sh4 *sh4, inst_t inst, opcode_func_t op_fn) {
     Sh4OpArgs oa;
     oa.inst = inst;
-    opcode_func_t op_func = op->func;
     bool delayed_branch_tmp = sh4->delayed_branch;
     addr32_t delayed_branch_addr_tmp = sh4->delayed_branch_addr;
 
 #ifdef DEEP_SYSCALL_TRACE
     deep_syscall_notify_jump(sh4->reg[SH4_REG_PC]);
 #endif
-    op_func(sh4, oa);
+    op_fn(sh4, oa);
 
 #ifdef ENABLE_DEBUGGER
     if (!sh4->aborted_operation) {

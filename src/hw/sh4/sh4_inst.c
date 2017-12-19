@@ -1047,12 +1047,12 @@ static InstOpcode invalid_opcode = {
         RAISE_ERROR(error_tp);                  \
     } while (0)
 
-InstOpcode const *sh4_inst_lut[1 << 16];
+opcode_func_t sh4_inst_lut[1 << 16];
 
 void sh4_init_inst_lut() {
     unsigned inst;
     for (inst = 0; inst < (1 << 16); inst++)
-        sh4_inst_lut[inst] = sh4_decode_inst_slow((inst_t)inst);
+        sh4_inst_lut[inst] = sh4_decode_inst_slow((inst_t)inst)->func;
 }
 
 // used to initialize the sh4_inst_lut
