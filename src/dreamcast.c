@@ -49,6 +49,7 @@
 #include "glfw/window.h"
 #include "hw/pvr2/framebuffer.h"
 #include "log.h"
+#include "hw/sh4/sh4_inst_def.h"
 
 #ifdef ENABLE_DEBUGGER
 #include "io/gdb_stub.h"
@@ -339,6 +340,8 @@ static void dreamcast_check_debugger(void) {
 
 #ifndef ENABLE_DEBUGGER
 static void dc_run_to_next_event(Sh4 *sh4) {
+    sh4_run_to_next_event(sh4);
+#if 0
     inst_t inst;
     InstOpcode const *op;
 
@@ -348,6 +351,7 @@ static void dc_run_to_next_event(Sh4 *sh4) {
 
         sh4_do_exec_inst(sh4, inst, op);
     }
+#endif
 }
 
 #else
