@@ -115,6 +115,14 @@ static void do_check_fpscr(reg32_t fpscr, reg32_t mask, reg32_t expect,
 
 #endif
 
+#define CHECK_DELAY_SLOT                                        \
+    do {                                                        \
+        if (sh4->delayed_branch) {                              \
+            sh4_set_exception(sh4, SH4_EXCP_SLOT_ILLEGAL_INST); \
+            return;                                             \
+        }                                                       \
+    } while (0)
+
 static inline void sh4_cycle_advance(Sh4 *sh4, sh4_inst_group_t group, unsigned issue) {
     unsigned n_cycles = sh4_count_inst_cycles(sh4, group, issue);
 
@@ -1125,6 +1133,8 @@ void sh4_inst_rts(Sh4 *sh4, Sh4OpArgs inst) {
 
     CHECK_INST(inst, INST_MASK_0000000000001011, INST_CONS_0000000000001011);
 
+    CHECK_DELAY_SLOT;
+
     sh4->delayed_branch = true;
     sh4->delayed_branch_addr = sh4->reg[SH4_REG_PR];
 
@@ -1764,6 +1774,8 @@ void sh4_inst_unary_braf_gen(Sh4 *sh4, Sh4OpArgs inst) {
 
     CHECK_INST(inst, INST_MASK_0000nnnn00100011, INST_CONS_0000nnnn00100011);
 
+    CHECK_DELAY_SLOT;
+
     sh4->delayed_branch = true;
     sh4->delayed_branch_addr = sh4->reg[SH4_REG_PC] + *sh4_gen_reg(sh4, inst.gen_reg) + 4;
 
@@ -1780,6 +1792,8 @@ void sh4_inst_unary_braf_gen(Sh4 *sh4, Sh4OpArgs inst) {
 void sh4_inst_unary_bsrf_gen(Sh4 *sh4, Sh4OpArgs inst) {
 
     CHECK_INST(inst, INST_MASK_0000nnnn00000011, INST_CONS_0000nnnn00000011);
+
+    CHECK_DELAY_SLOT;
 
     sh4->delayed_branch = true;
     sh4->reg[SH4_REG_PR] = sh4->reg[SH4_REG_PC] + 4;
@@ -1995,6 +2009,8 @@ void sh4_inst_unary_bf_disp(Sh4 *sh4, Sh4OpArgs inst) {
 
     CHECK_INST(inst, INST_MASK_10001011dddddddd, INST_CONS_10001011dddddddd);
 
+    CHECK_DELAY_SLOT;
+
     if (!(sh4->reg[SH4_REG_SR] & SH4_SR_FLAG_T_MASK)) {
         sh4->reg[SH4_REG_PC] += (((int32_t)inst.simm8) << 1) + 4;
 #ifdef DEEP_SYSCALL_TRACE
@@ -2016,6 +2032,8 @@ void sh4_inst_unary_bfs_disp(Sh4 *sh4, Sh4OpArgs inst) {
 
     CHECK_INST(inst, INST_MASK_10001111dddddddd, INST_CONS_10001111dddddddd);
 
+    CHECK_DELAY_SLOT;
+
     if (!(sh4->reg[SH4_REG_SR] & SH4_SR_FLAG_T_MASK)) {
         sh4->delayed_branch_addr = sh4->reg[SH4_REG_PC] + (((int32_t)inst.simm8) << 1) + 4;
         sh4->delayed_branch = true;
@@ -2034,6 +2052,8 @@ void sh4_inst_unary_bfs_disp(Sh4 *sh4, Sh4OpArgs inst) {
 void sh4_inst_unary_bt_disp(Sh4 *sh4, Sh4OpArgs inst) {
 
     CHECK_INST(inst, INST_MASK_10001001dddddddd, INST_CONS_10001001dddddddd);
+
+    CHECK_DELAY_SLOT;
 
     if (sh4->reg[SH4_REG_SR] & SH4_SR_FLAG_T_MASK) {
         sh4->reg[SH4_REG_PC] += (((int32_t)inst.simm8) << 1) + 4;
@@ -2056,6 +2076,8 @@ void sh4_inst_unary_bts_disp(Sh4 *sh4, Sh4OpArgs inst) {
 
     CHECK_INST(inst, INST_MASK_10001101dddddddd, INST_CONS_10001101dddddddd);
 
+    CHECK_DELAY_SLOT;
+
     if (sh4->reg[SH4_REG_SR] & SH4_SR_FLAG_T_MASK) {
         sh4->delayed_branch_addr = sh4->reg[SH4_REG_PC] + (((int32_t)inst.simm8) << 1) + 4;
         sh4->delayed_branch = true;
@@ -2075,6 +2097,8 @@ void sh4_inst_unary_bra_disp(Sh4 *sh4, Sh4OpArgs inst) {
 
     CHECK_INST(inst, INST_MASK_1010dddddddddddd, INST_CONS_1010dddddddddddd);
 
+    CHECK_DELAY_SLOT;
+
     sh4->delayed_branch = true;
     sh4->delayed_branch_addr = sh4->reg[SH4_REG_PC] + (((int32_t)inst.simm12) << 1) + 4;
 
@@ -2091,6 +2115,8 @@ void sh4_inst_unary_bra_disp(Sh4 *sh4, Sh4OpArgs inst) {
 void sh4_inst_unary_bsr_disp(Sh4 *sh4, Sh4OpArgs inst) {
 
     CHECK_INST(inst, INST_MASK_1011dddddddddddd, INST_CONS_1011dddddddddddd);
+
+    CHECK_DELAY_SLOT;
 
     sh4->reg[SH4_REG_PR] = sh4->reg[SH4_REG_PC] + 4;
     sh4->delayed_branch_addr = sh4->reg[SH4_REG_PC] + (((int32_t)inst.simm12) << 1) + 4;
@@ -2237,6 +2263,8 @@ void sh4_inst_unary_jmp_indgen(Sh4 *sh4, Sh4OpArgs inst) {
 
     CHECK_INST(inst, INST_MASK_0100nnnn00101011, INST_CONS_0100nnnn00101011);
 
+    CHECK_DELAY_SLOT;
+
     sh4->delayed_branch_addr = *sh4_gen_reg(sh4, inst.gen_reg);
     sh4->delayed_branch = true;
 
@@ -2253,6 +2281,8 @@ void sh4_inst_unary_jmp_indgen(Sh4 *sh4, Sh4OpArgs inst) {
 void sh4_inst_unary_jsr_indgen(Sh4 *sh4, Sh4OpArgs inst) {
 
     CHECK_INST(inst, INST_MASK_0100nnnn00001011, INST_CONS_0100nnnn00001011);
+
+    CHECK_DELAY_SLOT;
 
     sh4->reg[SH4_REG_PR] = sh4->reg[SH4_REG_PC] + 4;
     sh4->delayed_branch_addr = *sh4_gen_reg(sh4, inst.gen_reg);
