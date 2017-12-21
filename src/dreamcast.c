@@ -343,12 +343,54 @@ static void dc_run_to_next_event(Sh4 *sh4) {
     inst_t inst;
     InstOpcode const *op;
     unsigned inst_cycles;
-
-    while (dc_sched_target_stamp > dc_cycle_stamp()) {
+    unsigned iss1, group1;
+    unsigned iss2, group2;
+    dc_cycle_stamp_t cur_stamp = dc_cycle_stamp();
+    dc_cycle_stamp_t cycles_after;
+    while (dc_sched_target_stamp > cur_stamp) {
         inst = sh4_read_inst(sh4);
         op = sh4_decode_inst(sh4, inst);
-        inst_cycles = sh4_count_inst_cycles(sh4, op);
+        /* inst_cycles = sh4_count_inst_cycles(sh4, op); */
+        sh4_do_exec_inst(sh4, inst, op);
 
+        group1 = op->group;
+        iss1 = op->issue;
+        inst_cycles = iss1;
+
+        if (group1 == SH4_GROUP_CO)
+            goto advance;
+        inst = sh4_read_inst(sh4);
+        op = sh4_decode_inst(sh4, inst);
+        group2 = op->group;
+        iss2 = op->issue;
+
+        /* inst_cycles = sh4_count_inst_cycles(sh4, op); */
+        sh4_do_exec_inst(sh4, inst, op);
+
+
+        if (((group2 == SH4_GROUP_CO) ||
+             /* (group1 == SH4_GROUP_CO) || */
+             ((group1 == op->group) && (group2 != SH4_GROUP_MT)))) {
+            // second instruction was not free
+            inst_cycles += iss2;
+
+            /*
+             * no need to check for SH4_GROUP_CO here because we'll do that when we
+             * check for last_inst_type==SH4_GROUP_CO next time we're in this if
+             * statement
+             */
+            /* sh4->last_inst_type = op->group; */
+        } else {
+            /*
+             * cash in on the dual-issue pipeline's "free" instruction and set
+             * last_inst_type to SH4_GROUP_NONE so that the next instruction is
+             * not free.
+             */
+            /* inst_cycles = iss1; */
+            /* sh4->last_inst_type = SH4_GROUP_NONE; */
+        }
+
+    advance:
         /*
          * Advance the cycle counter based on how many cycles this instruction
          * will take.  If this would take us past the target stamp, that means
@@ -359,12 +401,10 @@ static void dc_run_to_next_event(Sh4 *sh4) {
          * a guest program's perspective, but the passage of time will still be
          * consistent.
          */
-        dc_cycle_stamp_t cycles_after = dc_cycle_stamp() +
+        cycles_after = cur_stamp +
             inst_cycles * SH4_CLOCK_SCALE;
         if (cycles_after > dc_sched_target_stamp)
             cycles_after = dc_sched_target_stamp;
-
-        sh4_do_exec_inst(sh4, inst, op);
 
         /*
          * advance the cycles, being careful not to skip over any new events
@@ -372,7 +412,8 @@ static void dc_run_to_next_event(Sh4 *sh4) {
          */
         if (cycles_after > dc_sched_target_stamp)
             cycles_after = dc_sched_target_stamp;
-        dc_cycle_advance(cycles_after - dc_cycle_stamp());
+        dc_cycle_advance(cycles_after - cur_stamp);
+        cur_stamp = cycles_after;
     }
 }
 
