@@ -245,7 +245,7 @@ typedef struct InstOpcode InstOpcode;
  * maps 16-bit instructions to InstOpcodes for O(1) decoding
  * this array looks big but it's really only half a megabyte
  */
-extern InstOpcode const *sh4_inst_lut[1 << 16];
+extern opcode_func_t sh4_inst_lut[1 << 16];
 
 void sh4_compile_instructions(Sh4 *sh4);
 void sh4_compile_instruction(Sh4 *sh4, struct InstOpcode *op);

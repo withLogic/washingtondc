@@ -272,7 +272,7 @@ static inline void sh4_periodic(Sh4 *sh4) {
 dc_cycle_stamp_t sh4_get_cycles(void);
 
 // Fetches the given instruction's metadata and returns it.
-static inline InstOpcode const *
+static inline opcode_func_t
 sh4_decode_inst(Sh4 *sh4, inst_t inst) {
     return sh4_inst_lut[inst];
 }

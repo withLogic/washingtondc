@@ -82,12 +82,16 @@ static inline unsigned sh4_branch_delay(Sh4 *sh4, addr32_t branch_addr) {
     // TODO: cycle-counting for the delay-slot inst
     sh4->reg[SH4_REG_PC] += 2;
     inst_t delay_slot_inst = sh4_read_inst(sh4);
-    InstOpcode const *op = sh4_decode_inst(sh4, delay_slot_inst);
+    /* InstOpcode const *op = sh4_decode_inst(sh4, delay_slot_inst); */
+    opcode_func_t func = sh4_decode_inst(sh4, delay_slot_inst);
+#if 0
+    // TODO - this
     if (op->pc_relative) {
         error_set_feature("delay slot exceptions");
         RAISE_ERROR(ERROR_UNIMPLEMENTED);
     }
-    unsigned cycles = sh4_do_exec_inst(sh4, delay_slot_inst, op);
+#endif
+    unsigned cycles = sh4_do_exec_inst(sh4, delay_slot_inst, func);
     sh4->reg[SH4_REG_PC] = branch_addr;
     return cycles;
 }
@@ -1051,12 +1055,12 @@ static InstOpcode invalid_opcode = {
         RAISE_ERROR(error_tp);                  \
     } while (0)
 
-InstOpcode const *sh4_inst_lut[1 << 16];
+opcode_func_t sh4_inst_lut[1 << 16];
 
 void sh4_init_inst_lut() {
     unsigned inst;
     for (inst = 0; inst < (1 << 16); inst++)
-        sh4_inst_lut[inst] = sh4_decode_inst_slow((inst_t)inst);
+        sh4_inst_lut[inst] = sh4_decode_inst_slow((inst_t)inst)->func;
 }
 
 // used to initialize the sh4_inst_lut

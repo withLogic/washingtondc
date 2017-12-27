@@ -116,11 +116,9 @@ static inline inst_t sh4_read_inst(Sh4 *sh4) {
 }
 
 static inline unsigned
-sh4_do_exec_inst(Sh4 *sh4, inst_t inst, InstOpcode const *op) {
+sh4_do_exec_inst(Sh4 *sh4, inst_t inst, opcode_func_t op_func) {
     Sh4OpArgs oa;
     oa.inst = inst;
-
-    opcode_func_t op_func = op->func;
 
     unsigned cycles = op_func(sh4, oa);
 

@@ -341,7 +341,7 @@ static void dreamcast_check_debugger(void) {
 #ifndef ENABLE_DEBUGGER
 static void dc_run_to_next_event(Sh4 *sh4) {
     inst_t inst;
-    InstOpcode const *op;
+    opcode_func_t op;
     unsigned inst_cycles;
 
     while (dc_sched_target_stamp > dc_cycle_stamp()) {
