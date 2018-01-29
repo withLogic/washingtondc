@@ -65,8 +65,9 @@ void jit_set_reg(struct jit_inst *op, unsigned reg_idx, uint32_t new_val) {
     op->immed.set_reg.reg_idx = reg_idx;
 }
 
-void jit_restore_sr(struct jit_inst *op) {
+void jit_restore_sr(struct jit_inst *op, unsigned slot_no) {
     op->op = JIT_OP_RESTORE_SR;
+    op->immed.restore_sr.slot_no = slot_no;
 }
 
 void jit_read_16_reg(struct jit_inst *op, addr32_t addr, unsigned reg_no) {
@@ -84,4 +85,16 @@ void jit_read_32_reg(struct jit_inst *op, addr32_t addr, unsigned reg_no) {
     op->op = JIT_OP_READ_32_REG;
     op->immed.read_32_reg.addr = addr;
     op->immed.read_32_reg.reg_no = reg_no;
+}
+
+void jit_load_slot(struct jit_inst *op, unsigned slot_no, uint32_t const *src) {
+    op->op = JIT_OP_LOAD_SLOT;
+    op->immed.load_slot.src = src;
+    op->immed.load_slot.slot_no = slot_no;
+}
+
+void jit_store_slot(struct jit_inst *op, unsigned slot_no, uint32_t *dst) {
+    op->op = JIT_OP_STORE_SLOT;
+    op->immed.store_slot.dst = dst;
+    op->immed.store_slot.slot_no = slot_no;
 }

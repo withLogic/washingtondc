@@ -317,6 +317,12 @@ void code_block_x86_64_compile(struct code_block_x86_64 *out,
         case JIT_OP_READ_32_REG:
             emit_read_32_reg(sh4, inst);
             break;
+        case JIT_OP_LOAD_SLOT:
+            RAISE_ERROR(ERROR_UNIMPLEMENTED);
+            break;
+        case JIT_OP_STORE_SLOT:
+            RAISE_ERROR(ERROR_UNIMPLEMENTED);
+            break;
         }
         inst++;
     }

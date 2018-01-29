@@ -36,6 +36,8 @@ void code_block_intp_init(struct code_block_intp *block) {
 void code_block_intp_cleanup(struct code_block_intp *block) {
     if (block->inst_list)
         free(block->inst_list);
+    if (block->slots)
+        free(block->slots);
 }
 
 void code_block_intp_compile(struct code_block_intp *out,
@@ -52,6 +54,8 @@ void code_block_intp_compile(struct code_block_intp *out,
     memcpy(out->inst_list, il_blk->inst_list, n_bytes);
     out->cycle_count = il_blk->cycle_count;
     out->inst_count = inst_count;
+    out->n_slots = il_blk->n_slots;
+    out->slots = (uint32_t*)malloc(out->n_slots * sizeof(uint32_t));
 }
 
 void code_block_intp_exec(struct code_block_intp const *block) {
@@ -113,7 +117,7 @@ void code_block_intp_exec(struct code_block_intp const *block) {
             break;
         case JIT_OP_RESTORE_SR:
             old_sr = cpu->reg[SH4_REG_SR];
-            cpu->reg[SH4_REG_SR] = cpu->reg[SH4_REG_SSR];
+            cpu->reg[SH4_REG_SR] = block->slots[inst->immed.restore_sr.slot_no];
             sh4_on_sr_change(cpu, old_sr);
             inst++;
             break;
@@ -130,6 +134,16 @@ void code_block_intp_exec(struct code_block_intp const *block) {
         case JIT_OP_READ_32_REG:
             cpu->reg[inst->immed.read_32_reg.reg_no] =
                 sh4_read_mem_32(cpu, inst->immed.read_32_reg.addr);
+            inst++;
+            break;
+        case JIT_OP_LOAD_SLOT:
+            block->slots[inst->immed.load_slot.slot_no] =
+                *inst->immed.load_slot.src;
+            inst++;
+            break;
+        case JIT_OP_STORE_SLOT:
+            *inst->immed.store_slot.dst =
+                block->slots[inst->immed.store_slot.slot_no];
             inst++;
             break;
         }

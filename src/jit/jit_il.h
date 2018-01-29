@@ -60,7 +60,7 @@ enum jit_opcode {
     // this will set a register to the given constant value
     JIT_SET_REG,
 
-    // this will copy SSR into SR and handle any state changes
+    // this will copy a slot into SR and handle any state changes
     JIT_OP_RESTORE_SR,
 
     // read 16 bits from a constant address and store them in a given sh4 register
@@ -69,7 +69,13 @@ enum jit_opcode {
     // sign-extend a 16-bit int in a register into a 32-bit int
     JIT_OP_SIGN_EXTEND_16,
 
-    JIT_OP_READ_32_REG
+    JIT_OP_READ_32_REG,
+
+    // load 32-bits from a host memory address into a jit register
+    JIT_OP_LOAD_SLOT,
+
+    // store 32-bits from a jit register address into a host memory address
+    JIT_OP_STORE_SLOT
 };
 
 struct jit_fallback_immed {
@@ -99,6 +105,10 @@ struct set_reg_immed {
     uint32_t new_val;
 };
 
+struct restore_sr_immed {
+    unsigned slot_no;
+};
+
 struct read_16_reg_immed {
     addr32_t addr;
     unsigned reg_no;
@@ -113,6 +123,16 @@ struct read_32_reg_immed {
     unsigned reg_no;
 };
 
+struct load_slot_immed {
+    uint32_t const *src;
+    unsigned slot_no;
+};
+
+struct store_slot_immed {
+    uint32_t *dst;
+    unsigned slot_no;
+};
+
 union jit_immed {
     struct jit_fallback_immed fallback;
     struct prepare_jump_immed prepare_jump;
@@ -120,9 +140,12 @@ union jit_immed {
     struct prepare_alt_jump_immed prepare_alt_jump;
     struct set_cond_jump_based_on_t_immed set_cond_jump_based_on_t;
     struct set_reg_immed set_reg;
+    struct restore_sr_immed restore_sr;
     struct read_16_reg_immed read_16_reg;
     struct sign_extend_16_immed sign_extend_16;
     struct read_32_reg_immed read_32_reg;
+    struct load_slot_immed load_slot;
+    struct store_slot_immed store_slot;
 };
 
 struct jit_inst {
@@ -139,9 +162,11 @@ void jit_jump(struct jit_inst *op);
 void jit_set_cond_jump_based_on_t(struct jit_inst *op, unsigned t_val);
 void jit_jump_cond(struct jit_inst *op);
 void jit_set_reg(struct jit_inst *op, unsigned reg_idx, uint32_t new_val);
-void jit_restore_sr(struct jit_inst *op);
+void jit_restore_sr(struct jit_inst *op, unsigned slot_no);
 void jit_read_16_reg(struct jit_inst *op, addr32_t addr, unsigned reg_no);
 void jit_sign_extend_16(struct jit_inst *op, unsigned reg_no);
 void jit_read_32_reg(struct jit_inst *op, addr32_t addr, unsigned reg_no);
+void jit_load_slot(struct jit_inst *op, unsigned slot_no, uint32_t const *src);
+void jit_store_slot(struct jit_inst *op, unsigned slot_no, uint32_t *dst);
 
 #endif
