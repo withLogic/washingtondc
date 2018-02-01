@@ -77,8 +77,8 @@ static unsigned n_slots_in_use;
 // this stores the maximum value of n_slots_in_use
 static unsigned max_slots;
 
-static unsigned alloc_slot(void);
-static void free_slot(unsigned slot_no);
+static unsigned res_alloc_slot(struct il_code_block *block, unsigned reg_no);
+static void res_free_slot(unsigned slot_no);
 
 /*
  * this will load the given register into a slot if it is not already in a slot
@@ -89,41 +89,62 @@ static void free_slot(unsigned slot_no);
  */
 static unsigned reg_slot(Sh4 *sh4, struct il_code_block *block, unsigned reg_no);
 
-// this function emits il ops to move all data in slots into registers.
-static void drain_slots(struct il_code_block *block) {
+/*
+ * return the slot index of a given register.  If the register is
+ * REG_STATUS_SH4, then allocate a new slot for it, set the reg status to
+ * REG_STATUS_SLOT and return the new slot.  If the reg status is
+ * REG_STATUS_SLOT_AND_SH4, then the existing slot index will be returned but
+ * the reg status will still be set to REG_STATUS_SLOT.
+ *
+ * This function will not load the register into the slot; instead it will set
+ * the register residency to point to the slot without initializing the slot
+ * contents.  This function is intended for situations in which the preexisting
+ * contents of a given register are irrelevant because they will immediately be
+ * overwritten.
+ */
+static unsigned
+reg_slot_noload(Sh4 *sh4, struct il_code_block *block, unsigned reg_no);
+
+static void res_drain_reg(struct il_code_block *block, unsigned reg_no) {
     Sh4 *sh4 = dreamcast_get_cpu();
-    unsigned reg_no;
+    struct residency *res = reg_map + reg_no;
     struct jit_inst il_inst;
-    for (reg_no = 0; reg_no < SH4_REGISTER_COUNT; reg_no++) {
-        struct residency *res = reg_map + reg_no;
-        if (res->stat == REG_STATUS_SLOT) {
-            jit_store_slot(&il_inst, res->slot_no, sh4->reg + reg_no);
-            il_code_block_push_inst(block, &il_inst);
-            res->stat = REG_STATUS_SLOT_AND_SH4;
-        }
+    if (res->stat == REG_STATUS_SLOT) {
+        jit_store_slot(&il_inst, res->slot_no, sh4->reg + reg_no);
+        il_code_block_push_inst(block, &il_inst);
+        res->stat = REG_STATUS_SLOT_AND_SH4;
     }
+}
+
+// this function emits il ops to move all data in slots into registers.
+static void res_drain_all_regs(struct il_code_block *block) {
+    unsigned reg_no;
+    for (reg_no = 0; reg_no < SH4_REGISTER_COUNT; reg_no++)
+        res_drain_reg(block, reg_no);
 }
 
 /*
  * mark the given register as REG_STATUS_SH4.
  * This does not write it back to the reg array.
  */
-static void invalidate_reg(unsigned reg_no) {
+static void res_invalidate_reg(unsigned reg_no) {
     struct residency *res = reg_map + reg_no;
-    res->stat = REG_STATUS_SH4;
-    n_slots_in_use--;
-    free_slot(res->slot_no);
+    if (res->stat != REG_STATUS_SH4) {
+        res->stat = REG_STATUS_SH4;
+        n_slots_in_use--;
+        res_free_slot(res->slot_no);
+    }
 }
 
 /*
  * mark all registers as REG_STATUS_SH4.
  * This does not write them back to the reg array.
  */
-static void invalidate_all_regs(void) {
+static void res_invalidate_all_regs(void) {
     unsigned reg_no;
     for (reg_no = 0; reg_no < SH4_REGISTER_COUNT; reg_no++)
         if (reg_map[reg_no].stat != REG_STATUS_SH4)
-            invalidate_reg(reg_no);
+            res_invalidate_reg(reg_no);
 }
 
 void sh4_disas_new_block(void) {
@@ -173,8 +194,8 @@ bool sh4_disas_fallback(struct il_code_block *block, unsigned pc,
                         struct InstOpcode const *op, inst_t inst) {
     struct jit_inst il_inst;
 
-    drain_slots(block);
-    invalidate_all_regs();
+    res_drain_all_regs(block);
+    res_invalidate_all_regs();
 
     il_inst.op = JIT_OP_FALLBACK;
     il_inst.immed.fallback.fallback_fn = op->func;
@@ -189,12 +210,13 @@ bool sh4_disas_rts(struct il_code_block *block, unsigned pc,
                    struct InstOpcode const *op, inst_t inst) {
     struct jit_inst jit_inst;
 
+    res_drain_reg(block, SH4_REG_PR);
     jit_prepare_jump(&jit_inst, SH4_REG_PR, 0);
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
 
-    drain_slots(block);
+    res_drain_all_regs(block);
 
     jit_jump(&jit_inst);
     il_code_block_push_inst(block, &jit_inst);
@@ -206,6 +228,7 @@ bool sh4_disas_rte(struct il_code_block *block, unsigned pc,
                    struct InstOpcode const *op, inst_t inst) {
     struct jit_inst jit_inst;
 
+    res_drain_reg(block, SH4_REG_SPC);
     jit_prepare_jump(&jit_inst, SH4_REG_SPC, 0);
     il_code_block_push_inst(block, &jit_inst);
 
@@ -215,15 +238,15 @@ bool sh4_disas_rte(struct il_code_block *block, unsigned pc,
      * is committed to the reg array and we also need to make sure we reload any
      * registers referenced after the jit_restore_sr operation.
      */
-    drain_slots(block);
-    invalidate_all_regs();
+    res_drain_all_regs(block);
+    res_invalidate_all_regs();
 
     jit_restore_sr(&jit_inst, reg_slot(dreamcast_get_cpu(), block, SH4_REG_SSR));
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
 
-    drain_slots(block);
+    res_drain_all_regs(block);
 
     jit_jump(&jit_inst);
     il_code_block_push_inst(block, &jit_inst);
@@ -237,12 +260,13 @@ bool sh4_disas_braf_rn(struct il_code_block *block, unsigned pc,
     unsigned reg_no = (inst >> 8) & 0xf;
     unsigned jump_offs = pc + 4;
 
+    res_drain_reg(block, SH4_REG_R0 + reg_no);
     jit_prepare_jump(&jit_inst, SH4_REG_R0 + reg_no, jump_offs);
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
 
-    drain_slots(block);
+    res_drain_all_regs(block);
 
     jit_jump(&jit_inst);
     il_code_block_push_inst(block, &jit_inst);
@@ -256,15 +280,17 @@ bool sh4_disas_bsrf_rn(struct il_code_block *block, unsigned pc,
     unsigned reg_no = (inst >> 8) & 0xf;
     unsigned jump_offs = pc + 4;
 
+    res_drain_reg(block, SH4_REG_R0 + reg_no);
     jit_prepare_jump(&jit_inst, SH4_REG_R0 + reg_no, jump_offs);
     il_code_block_push_inst(block, &jit_inst);
 
+    res_invalidate_reg(SH4_REG_PR);
     jit_set_reg(&jit_inst, SH4_REG_PR, pc + 4);
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
 
-    drain_slots(block);
+    res_drain_all_regs(block);
 
     jit_jump(&jit_inst);
     il_code_block_push_inst(block, &jit_inst);
@@ -283,10 +309,11 @@ bool sh4_disas_bf(struct il_code_block *block, unsigned pc,
     jit_prepare_alt_jump(&jit_inst, pc + 2);
     il_code_block_push_inst(block, &jit_inst);
 
+    res_drain_reg(block, SH4_REG_SR);
     jit_set_cond_jump_based_on_t(&jit_inst, 0);
     il_code_block_push_inst(block, &jit_inst);
 
-    drain_slots(block);
+    res_drain_all_regs(block);
 
     jit_jump_cond(&jit_inst);
     il_code_block_push_inst(block, &jit_inst);
@@ -305,10 +332,11 @@ bool sh4_disas_bt(struct il_code_block *block, unsigned pc,
     jit_prepare_alt_jump(&jit_inst, pc + 2);
     il_code_block_push_inst(block, &jit_inst);
 
+    res_drain_reg(block, SH4_REG_SR);
     jit_set_cond_jump_based_on_t(&jit_inst, 1);
     il_code_block_push_inst(block, &jit_inst);
 
-    drain_slots(block);
+    res_drain_all_regs(block);
 
     jit_jump_cond(&jit_inst);
     il_code_block_push_inst(block, &jit_inst);
@@ -327,12 +355,13 @@ bool sh4_disas_bfs(struct il_code_block *block, unsigned pc,
     jit_prepare_alt_jump(&jit_inst, pc + 4);
     il_code_block_push_inst(block, &jit_inst);
 
+    res_drain_reg(block, SH4_REG_SR);
     jit_set_cond_jump_based_on_t(&jit_inst, 0);
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
 
-    drain_slots(block);
+    res_drain_all_regs(block);
 
     jit_jump_cond(&jit_inst);
     il_code_block_push_inst(block, &jit_inst);
@@ -351,12 +380,13 @@ bool sh4_disas_bts(struct il_code_block *block, unsigned pc,
     jit_prepare_alt_jump(&jit_inst, pc + 4);
     il_code_block_push_inst(block, &jit_inst);
 
+    res_drain_reg(block, SH4_REG_SR);
     jit_set_cond_jump_based_on_t(&jit_inst, 1);
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
 
-    drain_slots(block);
+    res_drain_all_regs(block);
 
     jit_jump_cond(&jit_inst);
     il_code_block_push_inst(block, &jit_inst);
@@ -377,7 +407,7 @@ bool sh4_disas_bra(struct il_code_block *block, unsigned pc,
 
     sh4_disas_delay_slot(block, pc + 2);
 
-    drain_slots(block);
+    res_drain_all_regs(block);
 
     jit_jump(&jit_inst);
     il_code_block_push_inst(block, &jit_inst);
@@ -396,12 +426,13 @@ bool sh4_disas_bsr(struct il_code_block *block, unsigned pc,
     jit_prepare_jump_const(&jit_inst, pc + disp);
     il_code_block_push_inst(block, &jit_inst);
 
+    res_invalidate_reg(SH4_REG_PR);
     jit_set_reg(&jit_inst, SH4_REG_PR, pc + 4);
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
 
-    drain_slots(block);
+    res_drain_all_regs(block);
 
     jit_jump(&jit_inst);
     il_code_block_push_inst(block, &jit_inst);
@@ -414,12 +445,13 @@ bool sh4_disas_jmp_arn(struct il_code_block *block, unsigned pc,
     unsigned reg_no = (inst >> 8) & 0xf;
     struct jit_inst jit_inst;
 
+    res_drain_reg(block, SH4_REG_R0 + reg_no);
     jit_prepare_jump(&jit_inst, SH4_REG_R0 + reg_no, 0);
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
 
-    drain_slots(block);
+    res_drain_all_regs(block);
 
     jit_jump(&jit_inst);
     il_code_block_push_inst(block, &jit_inst);
@@ -432,15 +464,17 @@ bool sh4_disas_jsr_arn(struct il_code_block *block, unsigned pc,
     unsigned reg_no = (inst >> 8) & 0xf;
     struct jit_inst jit_inst;
 
+    res_drain_reg(block, SH4_REG_R0 + reg_no);
     jit_prepare_jump(&jit_inst, SH4_REG_R0 + reg_no, 0);
     il_code_block_push_inst(block, &jit_inst);
 
+    res_invalidate_reg(SH4_REG_PR);
     jit_set_reg(&jit_inst, SH4_REG_PR, pc + 4);
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
 
-    drain_slots(block);
+    res_drain_all_regs(block);
 
     jit_jump(&jit_inst);
     il_code_block_push_inst(block, &jit_inst);
@@ -456,9 +490,12 @@ bool sh4_disas_movw_a_disp_pc_rn(struct il_code_block *block, unsigned pc,
     unsigned disp = inst & 0xff;
     addr32_t addr = disp * 2 + pc + 4;
 
+    res_invalidate_reg(SH4_REG_R0 + reg_no);
     jit_read_16_reg(&jit_inst, addr, SH4_REG_R0 + reg_no);
     il_code_block_push_inst(block, &jit_inst);
 
+    res_drain_reg(block, SH4_REG_R0 + reg_no);
+    res_invalidate_reg(SH4_REG_R0 + reg_no);
     jit_sign_extend_16(&jit_inst, SH4_REG_R0 + reg_no);
     il_code_block_push_inst(block, &jit_inst);
 
@@ -472,8 +509,10 @@ bool sh4_disas_movl_a_disp_pc_rn(struct il_code_block *block, unsigned pc,
     unsigned reg_no = (inst >> 8) & 0xf;
     unsigned disp = inst & 0xff;
     addr32_t addr = disp * 4 + (pc & ~3) + 4;
+    Sh4 *cpu = dreamcast_get_cpu();
 
-    jit_read_32_reg(&jit_inst, addr, SH4_REG_R0 + reg_no);
+    unsigned slot_no = reg_slot_noload(cpu, block, reg_no);
+    jit_read_32_slot(&jit_inst, addr, slot_no);
     il_code_block_push_inst(block, &jit_inst);
 
     return true;
@@ -485,6 +524,7 @@ bool sh4_disas_mova_a_disp_pc_r0(struct il_code_block *block, unsigned pc,
     unsigned disp = inst & 0xff;
     addr32_t addr = disp * 4 + (pc & ~3) + 4;
 
+    res_invalidate_reg(SH4_REG_R0);
     jit_set_reg(&jit_inst, SH4_REG_R0, addr);
     il_code_block_push_inst(block, &jit_inst);
 
@@ -517,15 +557,12 @@ static unsigned reg_slot(Sh4 *sh4, struct il_code_block *block, unsigned reg_no)
 
     if (res->stat == REG_STATUS_SH4) {
         // need to load it into an unused slot
-        unsigned slot_no = alloc_slot();
+        unsigned slot_no = res_alloc_slot(block, reg_no);
         res->stat = REG_STATUS_SLOT_AND_SH4;
         res->slot_no = slot_no;
         n_slots_in_use++;
         if (n_slots_in_use > max_slots)
             max_slots = n_slots_in_use;
-        if (res->slot_no + 1 > block->n_slots) {
-            block->n_slots = res->slot_no + 1;
-        }
         // TODO: set res->last_read here
         jit_load_slot(&il_inst, slot_no, sh4->reg + reg_no);
         il_code_block_push_inst(block, &il_inst);
@@ -534,17 +571,40 @@ static unsigned reg_slot(Sh4 *sh4, struct il_code_block *block, unsigned reg_no)
     return res->slot_no;
 }
 
-static unsigned alloc_slot(void) {
+static unsigned reg_slot_noload(Sh4 *sh4,
+                                struct il_code_block *block, unsigned reg_no) {
+    struct residency *res = reg_map + reg_no;
+    if (res->stat == REG_STATUS_SH4) {
+        unsigned slot_no = res_alloc_slot(block, reg_no);
+        res->stat = REG_STATUS_SLOT;
+        res->slot_no = slot_no;
+        n_slots_in_use++;
+        if (n_slots_in_use > max_slots)
+            max_slots = n_slots_in_use;
+        // TODO: set res->last_read here
+    } else if (res->stat == REG_STATUS_SLOT_AND_SH4) {
+        res->stat = REG_STATUS_SLOT;
+    }
+    return res->slot_no;
+}
+
+static unsigned res_alloc_slot(struct il_code_block *block, unsigned reg_no) {
     unsigned slot_no;
+    struct residency *res = reg_map + reg_no;
+
     for (slot_no = 0; slot_no < SH4_REGISTER_COUNT; slot_no++)
         if (!slot_status[slot_no])
             break;
     if (slot_no == SH4_REGISTER_COUNT)
         RAISE_ERROR(ERROR_INTEGRITY); // out of slots
     slot_status[slot_no] = true;
+    if (slot_no + 1 > block->n_slots) {
+        block->n_slots = slot_no + 1;
+    }
+    res->slot_no = slot_no;
     return slot_no;
 }
 
-static void free_slot(unsigned slot_no) {
+static void res_free_slot(unsigned slot_no) {
     slot_status[slot_no] = false;
 }

@@ -131,9 +131,9 @@ void code_block_intp_exec(struct code_block_intp const *block) {
                 (int32_t)(int16_t)cpu->reg[inst->immed.sign_extend_16.reg_no];
             inst++;
             break;
-        case JIT_OP_READ_32_REG:
-            cpu->reg[inst->immed.read_32_reg.reg_no] =
-                sh4_read_mem_32(cpu, inst->immed.read_32_reg.addr);
+        case JIT_OP_READ_32_SLOT:
+            block->slots[inst->immed.read_32_slot.slot_no] =
+                sh4_read_mem_32(cpu, inst->immed.read_32_slot.addr);
             inst++;
             break;
         case JIT_OP_LOAD_SLOT:

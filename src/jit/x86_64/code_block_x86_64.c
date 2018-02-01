@@ -255,6 +255,8 @@ void emit_sign_extend_16(Sh4 *sh4, struct jit_inst const *inst) {
 
 // JIT_OP_READ_32_REG implementation
 void emit_read_32_reg(Sh4 *sh4, struct jit_inst const *inst) {
+    RAISE_ERROR(ERROR_UNIMPLEMENTED);
+#if 0
     uint32_t vaddr = inst->immed.read_32_reg.addr;
     void *reg_ptr = sh4->reg + inst->immed.read_32_reg.reg_no;
 
@@ -266,6 +268,7 @@ void emit_read_32_reg(Sh4 *sh4, struct jit_inst const *inst) {
     // move the return value into *reg_ptr
     x86asm_mov_imm64_reg64((uint64_t)(uintptr_t)reg_ptr, RDI);
     x86asm_mov_reg32_indreg32(EAX, RDI);
+#endif
 }
 
 void code_block_x86_64_compile(struct code_block_x86_64 *out,
@@ -314,8 +317,9 @@ void code_block_x86_64_compile(struct code_block_x86_64 *out,
         case JIT_OP_SIGN_EXTEND_16:
             emit_sign_extend_16(sh4, inst);
             break;
-        case JIT_OP_READ_32_REG:
-            emit_read_32_reg(sh4, inst);
+        case JIT_OP_READ_32_SLOT:
+            RAISE_ERROR(ERROR_UNIMPLEMENTED);
+            /* emit_read_32_reg(sh4, inst); */
             break;
         case JIT_OP_LOAD_SLOT:
             RAISE_ERROR(ERROR_UNIMPLEMENTED);

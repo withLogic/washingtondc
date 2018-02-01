@@ -69,7 +69,7 @@ enum jit_opcode {
     // sign-extend a 16-bit int in a register into a 32-bit int
     JIT_OP_SIGN_EXTEND_16,
 
-    JIT_OP_READ_32_REG,
+    JIT_OP_READ_32_SLOT,
 
     // load 32-bits from a host memory address into a jit register
     JIT_OP_LOAD_SLOT,
@@ -118,9 +118,9 @@ struct sign_extend_16_immed {
     unsigned reg_no;
 };
 
-struct read_32_reg_immed {
+struct read_32_slot_immed {
     addr32_t addr;
-    unsigned reg_no;
+    unsigned slot_no;
 };
 
 struct load_slot_immed {
@@ -143,7 +143,7 @@ union jit_immed {
     struct restore_sr_immed restore_sr;
     struct read_16_reg_immed read_16_reg;
     struct sign_extend_16_immed sign_extend_16;
-    struct read_32_reg_immed read_32_reg;
+    struct read_32_slot_immed read_32_slot;
     struct load_slot_immed load_slot;
     struct store_slot_immed store_slot;
 };
@@ -165,7 +165,7 @@ void jit_set_reg(struct jit_inst *op, unsigned reg_idx, uint32_t new_val);
 void jit_restore_sr(struct jit_inst *op, unsigned slot_no);
 void jit_read_16_reg(struct jit_inst *op, addr32_t addr, unsigned reg_no);
 void jit_sign_extend_16(struct jit_inst *op, unsigned reg_no);
-void jit_read_32_reg(struct jit_inst *op, addr32_t addr, unsigned reg_no);
+void jit_read_32_slot(struct jit_inst *op, addr32_t addr, unsigned slot_no);
 void jit_load_slot(struct jit_inst *op, unsigned slot_no, uint32_t const *src);
 void jit_store_slot(struct jit_inst *op, unsigned slot_no, uint32_t *dst);
 
