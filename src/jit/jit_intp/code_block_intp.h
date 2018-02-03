@@ -48,6 +48,6 @@ void code_block_intp_cleanup(struct code_block_intp *block);
 void code_block_intp_compile(struct code_block_intp *out,
                              struct il_code_block const *il_blk);
 
-void code_block_intp_exec(struct code_block_intp const *block);
+reg32_t code_block_intp_exec(struct code_block_intp const *block);
 
 #endif

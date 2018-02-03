@@ -58,7 +58,7 @@ void code_block_intp_compile(struct code_block_intp *out,
     out->slots = (uint32_t*)malloc(out->n_slots * sizeof(uint32_t));
 }
 
-void code_block_intp_exec(struct code_block_intp const *block) {
+reg32_t code_block_intp_exec(struct code_block_intp const *block) {
     unsigned inst_count = block->inst_count;
     struct jit_inst const* inst = block->inst_list;
     Sh4 *cpu = dreamcast_get_cpu();
@@ -86,8 +86,7 @@ void code_block_intp_exec(struct code_block_intp const *block) {
             inst++;
             break;
         case JIT_OP_JUMP:
-            cpu->reg[SH4_REG_PC] = jump_addr;
-            return;
+            return jump_addr;
         case JIT_SET_COND_JUMP_BASED_ON_T:
             /*
              * set conditional jump flag if t_flag == the sh4's t flag.
@@ -106,10 +105,9 @@ void code_block_intp_exec(struct code_block_intp const *block) {
              * complete in the same number of cycles every time.
              */
             if (cond_jump_flag)
-                cpu->reg[SH4_REG_PC] = jump_addr;
+                return jump_addr;
             else
-                cpu->reg[SH4_REG_PC] = alt_jump_addr;
-            return;
+                return alt_jump_addr;
         case JIT_SET_SLOT:
             block->slots[inst->immed.set_slot.slot_idx] =
                 inst->immed.set_slot.new_val;

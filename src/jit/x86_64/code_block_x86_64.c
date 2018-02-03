@@ -139,10 +139,7 @@ void emit_prepare_alt_jump(Sh4 *sh4, struct jit_inst const *inst) {
 
 // JIT_OP_JUMP implementation
 void emit_jump(Sh4 *sh4, struct jit_inst const *inst) {
-    void *ptr = sh4->reg + SH4_REG_PC;
-    x86asm_mov_imm64_reg64((uint64_t)(uintptr_t)ptr, RCX);
-    x86asm_mov_reg32_indreg32(JMP_ADDR_REG, RCX);
-
+    x86asm_mov_reg32_reg32(JMP_ADDR_REG, EAX);
     emit_stack_frame_close();
     x86asm_ret();
 }
@@ -189,10 +186,7 @@ void emit_jump_cond(Sh4 *sh4, struct jit_inst const *inst) {
 
     x86asm_call_ptr(pick_cond_jump);
 
-    // the chosen address is now in %eax.  Move it to sh4->reg[SH4_REG_PC].
-    void *pc_ptr = sh4->reg + SH4_REG_PC;
-    x86asm_mov_imm64_reg64((uint64_t)(uintptr_t)pc_ptr, RDI);
-    x86asm_mov_reg32_indreg32(EAX, RDI);
+    // the chosen address is now in %eax, so we're ready to return
 
     emit_stack_frame_close();
     x86asm_ret();
