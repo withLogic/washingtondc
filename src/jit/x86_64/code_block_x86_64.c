@@ -228,20 +228,21 @@ void emit_restore_sr(Sh4 *sh4, struct jit_inst const *inst) {
 
 // JIT_OP_READ_16_REG implementation
 void emit_read_16_reg(Sh4 *sh4, struct jit_inst const *inst) {
-    uint32_t vaddr = inst->immed.read_16_reg.addr;
-    void *reg_ptr = sh4->reg + inst->immed.read_16_reg.reg_no;
+    RAISE_ERROR(ERROR_UNIMPLEMENTED);
+    /* uint32_t vaddr = inst->immed.read_16_reg.addr; */
+    /* void *reg_ptr = sh4->reg + inst->immed.read_16_reg.reg_no; */
 
-    // call sh4_read_mem_16(sh4, vaddr)
-    x86asm_mov_imm64_reg64((uint64_t)(uintptr_t)sh4, RDI);
-    x86asm_mov_imm32_reg32(vaddr, ESI);
-    x86asm_call_ptr(sh4_read_mem_16);
+    /* // call sh4_read_mem_16(sh4, vaddr) */
+    /* x86asm_mov_imm64_reg64((uint64_t)(uintptr_t)sh4, RDI); */
+    /* x86asm_mov_imm32_reg32(vaddr, ESI); */
+    /* x86asm_call_ptr(sh4_read_mem_16); */
 
-    // zero-extend the 16-bit value (maybe this isn't necessary?  IDK...)
-    x86asm_and_imm32_rax(0x0000ffff);
+    /* // zero-extend the 16-bit value (maybe this isn't necessary?  IDK...) */
+    /* x86asm_and_imm32_rax(0x0000ffff); */
 
-    // move the return value into *reg_ptr
-    x86asm_mov_imm64_reg64((uint64_t)(uintptr_t)reg_ptr, RDI);
-    x86asm_mov_reg32_indreg32(EAX, RDI);
+    /* // move the return value into *reg_ptr */
+    /* x86asm_mov_imm64_reg64((uint64_t)(uintptr_t)reg_ptr, RDI); */
+    /* x86asm_mov_reg32_indreg32(EAX, RDI); */
 }
 
 // JIT_OP_SIGN_EXTEND_16 implementation
@@ -311,8 +312,9 @@ void code_block_x86_64_compile(struct code_block_x86_64 *out,
         case JIT_OP_RESTORE_SR:
             emit_restore_sr(sh4, inst);
             break;
-        case JIT_OP_READ_16_REG:
-            emit_read_16_reg(sh4, inst);
+        case JIT_OP_READ_16_SLOT:
+            RAISE_ERROR(ERROR_UNIMPLEMENTED);
+            /* emit_read_16_reg(sh4, inst); */
             break;
         case JIT_OP_SIGN_EXTEND_16:
             emit_sign_extend_16(sh4, inst);

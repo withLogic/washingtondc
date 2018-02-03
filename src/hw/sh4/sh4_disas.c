@@ -486,17 +486,20 @@ bool sh4_disas_jsr_arn(struct il_code_block *block, unsigned pc,
 bool sh4_disas_movw_a_disp_pc_rn(struct il_code_block *block, unsigned pc,
                                  struct InstOpcode const *op, inst_t inst) {
     struct jit_inst jit_inst;
-    unsigned reg_no = (inst >> 8) & 0xf;
+    unsigned reg_no = ((inst >> 8) & 0xf) + SH4_REG_R0;
     unsigned disp = inst & 0xff;
     addr32_t addr = disp * 2 + pc + 4;
+    Sh4 *cpu = dreamcast_get_cpu();
 
-    res_invalidate_reg(SH4_REG_R0 + reg_no);
-    jit_read_16_reg(&jit_inst, addr, SH4_REG_R0 + reg_no);
+    /* res_invalidate_reg(reg_no); */
+    unsigned slot_no = reg_slot_noload(cpu, block, reg_no);
+    jit_read_16_slot(&jit_inst, addr, slot_no);
     il_code_block_push_inst(block, &jit_inst);
+    /* res_drain_reg(block, reg_no); */
 
-    res_drain_reg(block, SH4_REG_R0 + reg_no);
-    res_invalidate_reg(SH4_REG_R0 + reg_no);
-    jit_sign_extend_16(&jit_inst, SH4_REG_R0 + reg_no);
+    res_drain_reg(block, reg_no);
+    res_invalidate_reg(reg_no);
+    jit_sign_extend_16(&jit_inst, reg_no);
     il_code_block_push_inst(block, &jit_inst);
 
     return true;
