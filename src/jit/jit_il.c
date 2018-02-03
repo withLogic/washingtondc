@@ -59,10 +59,10 @@ void jit_jump_cond(struct jit_inst *op) {
     op->op = JIT_JUMP_COND;
 }
 
-void jit_set_reg(struct jit_inst *op, unsigned reg_idx, uint32_t new_val) {
-    op->op = JIT_SET_REG;
-    op->immed.set_reg.new_val = new_val;
-    op->immed.set_reg.reg_idx = reg_idx;
+void jit_set_slot(struct jit_inst *op, unsigned slot_idx, uint32_t new_val) {
+    op->op = JIT_SET_SLOT;
+    op->immed.set_slot.new_val = new_val;
+    op->immed.set_slot.slot_idx = slot_idx;
 }
 
 void jit_restore_sr(struct jit_inst *op, unsigned slot_no) {

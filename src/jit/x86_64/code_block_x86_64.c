@@ -199,12 +199,13 @@ void emit_jump_cond(Sh4 *sh4, struct jit_inst const *inst) {
 
 // JIT_SET_REG implementation
 void emit_set_reg(Sh4 *sh4, struct jit_inst const *inst) {
-    void *reg_ptr = sh4->reg + inst->immed.set_reg.reg_idx;
-    uint32_t new_val = inst->immed.set_reg.new_val;
+    RAISE_ERROR(ERROR_UNIMPLEMENTED);
+    /* void *reg_ptr = sh4->reg + inst->immed.set_reg.reg_idx; */
+    /* uint32_t new_val = inst->immed.set_reg.new_val; */
 
-    x86asm_mov_imm32_reg32(new_val, EAX);
-    x86asm_mov_imm64_reg64((uint64_t)(uintptr_t)reg_ptr, RCX);
-    x86asm_mov_reg32_indreg32(EAX, RCX);
+    /* x86asm_mov_imm32_reg32(new_val, EAX); */
+    /* x86asm_mov_imm64_reg64((uint64_t)(uintptr_t)reg_ptr, RCX); */
+    /* x86asm_mov_reg32_indreg32(EAX, RCX); */
 }
 
 // JIT_OP_RESTORE_SR implementation
@@ -305,8 +306,9 @@ void code_block_x86_64_compile(struct code_block_x86_64 *out,
         case JIT_JUMP_COND:
             emit_jump_cond(sh4, inst);
             return;
-        case JIT_SET_REG:
-            emit_set_reg(sh4, inst);
+        case JIT_SET_SLOT:
+            RAISE_ERROR(ERROR_UNIMPLEMENTED);
+            /* emit_set_reg(sh4, inst); */
             break;
         case JIT_OP_RESTORE_SR:
             emit_restore_sr(sh4, inst);

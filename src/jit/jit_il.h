@@ -58,7 +58,7 @@ enum jit_opcode {
     JIT_JUMP_COND,
 
     // this will set a register to the given constant value
-    JIT_SET_REG,
+    JIT_SET_SLOT,
 
     // this will copy a slot into SR and handle any state changes
     JIT_OP_RESTORE_SR,
@@ -100,8 +100,8 @@ struct set_cond_jump_based_on_t_immed {
     unsigned t_flag;
 };
 
-struct set_reg_immed {
-    unsigned reg_idx;
+struct set_slot_immed {
+    unsigned slot_idx;
     uint32_t new_val;
 };
 
@@ -139,7 +139,7 @@ union jit_immed {
     struct prepare_jump_const_immed prepare_jump_const;
     struct prepare_alt_jump_immed prepare_alt_jump;
     struct set_cond_jump_based_on_t_immed set_cond_jump_based_on_t;
-    struct set_reg_immed set_reg;
+    struct set_slot_immed set_slot;
     struct restore_sr_immed restore_sr;
     struct read_16_slot_immed read_16_slot;
     struct sign_extend_16_immed sign_extend_16;
@@ -161,7 +161,7 @@ void jit_prepare_alt_jump(struct jit_inst *op, unsigned new_pc);
 void jit_jump(struct jit_inst *op);
 void jit_set_cond_jump_based_on_t(struct jit_inst *op, unsigned t_val);
 void jit_jump_cond(struct jit_inst *op);
-void jit_set_reg(struct jit_inst *op, unsigned reg_idx, uint32_t new_val);
+void jit_set_slot(struct jit_inst *op, unsigned reg_idx, uint32_t new_val);
 void jit_restore_sr(struct jit_inst *op, unsigned slot_no);
 void jit_read_16_slot(struct jit_inst *op, addr32_t addr, unsigned slot_no);
 void jit_sign_extend_16(struct jit_inst *op, unsigned slot_no);

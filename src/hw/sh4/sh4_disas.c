@@ -284,8 +284,8 @@ bool sh4_disas_bsrf_rn(struct il_code_block *block, unsigned pc,
     jit_prepare_jump(&jit_inst, SH4_REG_R0 + reg_no, jump_offs);
     il_code_block_push_inst(block, &jit_inst);
 
-    res_invalidate_reg(SH4_REG_PR);
-    jit_set_reg(&jit_inst, SH4_REG_PR, pc + 4);
+    unsigned slot_no = reg_slot_noload(dreamcast_get_cpu(), block, SH4_REG_PR);
+    jit_set_slot(&jit_inst, slot_no, pc + 4);
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
@@ -426,8 +426,8 @@ bool sh4_disas_bsr(struct il_code_block *block, unsigned pc,
     jit_prepare_jump_const(&jit_inst, pc + disp);
     il_code_block_push_inst(block, &jit_inst);
 
-    res_invalidate_reg(SH4_REG_PR);
-    jit_set_reg(&jit_inst, SH4_REG_PR, pc + 4);
+    unsigned slot_no = reg_slot_noload(dreamcast_get_cpu(), block, SH4_REG_PR);
+    jit_set_slot(&jit_inst, slot_no, pc + 4);
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
@@ -468,8 +468,8 @@ bool sh4_disas_jsr_arn(struct il_code_block *block, unsigned pc,
     jit_prepare_jump(&jit_inst, SH4_REG_R0 + reg_no, 0);
     il_code_block_push_inst(block, &jit_inst);
 
-    res_invalidate_reg(SH4_REG_PR);
-    jit_set_reg(&jit_inst, SH4_REG_PR, pc + 4);
+    unsigned slot_no = reg_slot_noload(dreamcast_get_cpu(), block, SH4_REG_PR);
+    jit_set_slot(&jit_inst, slot_no, pc + 4);
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
@@ -524,8 +524,8 @@ bool sh4_disas_mova_a_disp_pc_r0(struct il_code_block *block, unsigned pc,
     unsigned disp = inst & 0xff;
     addr32_t addr = disp * 4 + (pc & ~3) + 4;
 
-    res_invalidate_reg(SH4_REG_R0);
-    jit_set_reg(&jit_inst, SH4_REG_R0, addr);
+    unsigned slot_no = reg_slot_noload(dreamcast_get_cpu(), block, SH4_REG_R0);
+    jit_set_slot(&jit_inst, slot_no, addr);
     il_code_block_push_inst(block, &jit_inst);
 
     return true;

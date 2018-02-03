@@ -111,8 +111,9 @@ void code_block_intp_exec(struct code_block_intp const *block) {
             else
                 cpu->reg[SH4_REG_PC] = alt_jump_addr;
             return;
-        case JIT_SET_REG:
-            cpu->reg[inst->immed.set_reg.reg_idx] = inst->immed.set_reg.new_val;
+        case JIT_SET_SLOT:
+            block->slots[inst->immed.set_slot.slot_idx] =
+                inst->immed.set_slot.new_val;
             inst++;
             break;
         case JIT_OP_RESTORE_SR:
