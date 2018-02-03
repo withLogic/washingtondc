@@ -152,6 +152,11 @@ void code_block_intp_exec(struct code_block_intp const *block) {
                 block->slots[inst->immed.add.slot_src];
             inst++;
             break;
+        case JIT_OP_ADD_CONST32:
+            block->slots[inst->immed.add_const32.slot_dst] +=
+                inst->immed.add_const32.const32;
+            inst++;
+            break;
         }
     }
 

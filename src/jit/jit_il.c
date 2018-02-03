@@ -104,3 +104,9 @@ void jit_add(struct jit_inst *op, unsigned slot_src, unsigned slot_dst) {
     op->immed.add.slot_src = slot_src;
     op->immed.add.slot_dst = slot_dst;
 }
+
+void jit_add_const32(struct jit_inst *op, unsigned slot_dst, uint32_t const32) {
+    op->op = JIT_OP_ADD_CONST32;
+    op->immed.add_const32.slot_dst = slot_dst;
+    op->immed.add_const32.const32 = const32;
+}

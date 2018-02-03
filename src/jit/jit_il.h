@@ -78,7 +78,10 @@ enum jit_opcode {
     JIT_OP_STORE_SLOT,
 
     // add one slot into another
-    JIT_OP_ADD
+    JIT_OP_ADD,
+
+    // add a 32-bit constant value into a slot
+    JIT_OP_ADD_CONST32
 };
 
 struct jit_fallback_immed {
@@ -140,6 +143,11 @@ struct add_immed {
     unsigned slot_src, slot_dst;
 };
 
+struct add_const32_immed {
+    unsigned slot_dst;
+    uint32_t const32;
+};
+
 union jit_immed {
     struct jit_fallback_immed fallback;
     struct prepare_jump_immed prepare_jump;
@@ -154,6 +162,7 @@ union jit_immed {
     struct load_slot_immed load_slot;
     struct store_slot_immed store_slot;
     struct add_immed add;
+    struct add_const32_immed add_const32;
 };
 
 struct jit_inst {
@@ -177,5 +186,6 @@ void jit_read_32_slot(struct jit_inst *op, addr32_t addr, unsigned slot_no);
 void jit_load_slot(struct jit_inst *op, unsigned slot_no, uint32_t const *src);
 void jit_store_slot(struct jit_inst *op, unsigned slot_no, uint32_t *dst);
 void jit_add(struct jit_inst *op, unsigned slot_src, unsigned slot_dst);
+void jit_add_const32(struct jit_inst *op, unsigned slot_dst, uint32_t const32);
 
 #endif
