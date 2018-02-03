@@ -169,22 +169,31 @@ struct jit_inst {
     union jit_immed immed;
 };
 
-void jit_fallback(struct jit_inst *op,
+struct il_code_block;
+
+void jit_fallback(struct il_code_block *block,
                   void(*fallback_fn)(Sh4*,Sh4OpArgs), inst_t inst);
-void jit_prepare_jump(struct jit_inst *op, unsigned slot_idx);
-void jit_prepare_jump_const(struct jit_inst *op, unsigned new_pc);
-void jit_prepare_alt_jump(struct jit_inst *op, unsigned new_pc);
-void jit_jump(struct jit_inst *op);
-void jit_set_cond_jump_based_on_t(struct jit_inst *op, unsigned t_val);
-void jit_jump_cond(struct jit_inst *op);
-void jit_set_slot(struct jit_inst *op, unsigned reg_idx, uint32_t new_val);
-void jit_restore_sr(struct jit_inst *op, unsigned slot_no);
-void jit_read_16_slot(struct jit_inst *op, addr32_t addr, unsigned slot_no);
-void jit_sign_extend_16(struct jit_inst *op, unsigned slot_no);
-void jit_read_32_slot(struct jit_inst *op, addr32_t addr, unsigned slot_no);
-void jit_load_slot(struct jit_inst *op, unsigned slot_no, uint32_t const *src);
-void jit_store_slot(struct jit_inst *op, unsigned slot_no, uint32_t *dst);
-void jit_add(struct jit_inst *op, unsigned slot_src, unsigned slot_dst);
-void jit_add_const32(struct jit_inst *op, unsigned slot_dst, uint32_t const32);
+void jit_prepare_jump(struct il_code_block *block, unsigned slot_idx);
+void jit_prepare_jump_const(struct il_code_block *block, unsigned new_pc);
+void jit_prepare_alt_jump(struct il_code_block *block, unsigned new_pc);
+void jit_jump(struct il_code_block *block);
+void jit_set_cond_jump_based_on_t(struct il_code_block *block, unsigned t_val);
+void jit_jump_cond(struct il_code_block *block);
+void jit_set_slot(struct il_code_block *block, unsigned slot_idx,
+                  uint32_t new_val);
+void jit_restore_sr(struct il_code_block *block, unsigned slot_no);
+void jit_read_16_slot(struct il_code_block *block, addr32_t addr,
+                      unsigned slot_no);
+void jit_sign_extend_16(struct il_code_block *block, unsigned slot_no);
+void jit_read_32_slot(struct il_code_block *block, addr32_t addr,
+                      unsigned slot_no);
+void jit_load_slot(struct il_code_block *block, unsigned slot_no,
+                   uint32_t const *src);
+void jit_store_slot(struct il_code_block *block, unsigned slot_no,
+                    uint32_t *dst);
+void jit_add(struct il_code_block *block, unsigned slot_src,
+             unsigned slot_dst);
+void jit_add_const32(struct il_code_block *block, unsigned slot_dst,
+                     uint32_t const32);
 
 #endif
