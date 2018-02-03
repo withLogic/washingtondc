@@ -258,6 +258,7 @@ bool sh4_disas_braf_rn(struct il_code_block *block, unsigned pc,
     res_disassociate_reg(block, SH4_REG_R0 + reg_no);
     jit_add_const32(block, slot_no, jump_offs);
     jit_prepare_jump(block, slot_no);
+    res_free_slot(slot_no);
 
     sh4_disas_delay_slot(block, pc + 2);
 
@@ -273,10 +274,12 @@ bool sh4_disas_bsrf_rn(struct il_code_block *block, unsigned pc,
     unsigned reg_no = (inst >> 8) & 0xf;
     unsigned jump_offs = pc + 4;
 
-    unsigned slot_no = reg_slot(dreamcast_get_cpu(), block, SH4_REG_R0 + reg_no);
+    unsigned slot_no = reg_slot(dreamcast_get_cpu(),
+                                block, SH4_REG_R0 + reg_no);
     res_disassociate_reg(block, SH4_REG_R0 + reg_no);
     jit_add_const32(block, slot_no, jump_offs);
     jit_prepare_jump(block, slot_no);
+    res_free_slot(slot_no);
 
     slot_no = reg_slot_noload(dreamcast_get_cpu(), block, SH4_REG_PR);
     jit_set_slot(block, slot_no, pc + 4);
