@@ -77,7 +77,9 @@ static unsigned n_slots_in_use;
 // this stores the maximum value of n_slots_in_use
 static unsigned max_slots;
 
-static unsigned res_alloc_slot(struct il_code_block *block, unsigned reg_no);
+static void res_associate_reg(unsigned reg_no, unsigned slot_no);
+
+static unsigned res_alloc_slot(struct il_code_block *block);
 static void res_free_slot(unsigned slot_no);
 
 /*
@@ -557,7 +559,8 @@ static unsigned reg_slot(Sh4 *sh4, struct il_code_block *block, unsigned reg_no)
 
     if (res->stat == REG_STATUS_SH4) {
         // need to load it into an unused slot
-        unsigned slot_no = res_alloc_slot(block, reg_no);
+        unsigned slot_no = res_alloc_slot(block);
+        res_associate_reg(reg_no, slot_no);
         res->stat = REG_STATUS_SLOT_AND_SH4;
         res->slot_no = slot_no;
         n_slots_in_use++;
@@ -575,7 +578,8 @@ static unsigned reg_slot_noload(Sh4 *sh4,
                                 struct il_code_block *block, unsigned reg_no) {
     struct residency *res = reg_map + reg_no;
     if (res->stat == REG_STATUS_SH4) {
-        unsigned slot_no = res_alloc_slot(block, reg_no);
+        unsigned slot_no = res_alloc_slot(block);
+        res_associate_reg(reg_no, slot_no);
         res->stat = REG_STATUS_SLOT;
         res->slot_no = slot_no;
         n_slots_in_use++;
@@ -588,9 +592,8 @@ static unsigned reg_slot_noload(Sh4 *sh4,
     return res->slot_no;
 }
 
-static unsigned res_alloc_slot(struct il_code_block *block, unsigned reg_no) {
+static unsigned res_alloc_slot(struct il_code_block *block) {
     unsigned slot_no;
-    struct residency *res = reg_map + reg_no;
 
     for (slot_no = 0; slot_no < SH4_REGISTER_COUNT; slot_no++)
         if (!slot_status[slot_no])
@@ -601,8 +604,13 @@ static unsigned res_alloc_slot(struct il_code_block *block, unsigned reg_no) {
     if (slot_no + 1 > block->n_slots) {
         block->n_slots = slot_no + 1;
     }
-    res->slot_no = slot_no;
+
     return slot_no;
+}
+
+static void res_associate_reg(unsigned reg_no, unsigned slot_no) {
+    struct residency *res = reg_map + reg_no;
+    res->slot_no = slot_no;
 }
 
 static void res_free_slot(unsigned slot_no) {
