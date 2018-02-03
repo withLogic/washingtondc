@@ -65,11 +65,10 @@ static struct residency reg_map[SH4_REGISTER_COUNT];
 
 /*
  * this tells whether a given slot is in use.
- * from the IL's perspective, there can be up to INT_MAX slots, but there's no
- * reason why the sh4 disassembly would ever need to have more slots than there
- * are registers, so the maximum number of slots is actually SH4_REGISTER_COUNT.
+ * It is safe to make MAX_SLOTS bigger if necessary
  */
-static bool slot_status[SH4_REGISTER_COUNT];
+#define MAX_SLOTS SH4_REGISTER_COUNT
+static bool slot_status[MAX_SLOTS];
 
 // this counts how many slots are currently in use
 static unsigned n_slots_in_use;
@@ -151,14 +150,18 @@ static void res_invalidate_all_regs(void) {
 }
 
 void sh4_disas_new_block(void) {
-    unsigned reg_no = 0;
+    unsigned reg_no;
     for (reg_no = 0; reg_no < SH4_REGISTER_COUNT; reg_no++) {
         reg_map[reg_no].slot_no = -1;
         reg_map[reg_no].stat = REG_STATUS_SH4;
         reg_map[reg_no].last_read = 0;
         reg_map[reg_no].last_write = 0;
-        slot_status[reg_no] = false;
     }
+
+    unsigned slot_no;
+    for (slot_no = 0; slot_no < MAX_SLOTS; slot_no++)
+        slot_status[slot_no] = false;
+
     n_slots_in_use = 0;
     max_slots = 0;
 }
@@ -602,10 +605,10 @@ static unsigned reg_slot_noload(Sh4 *sh4,
 static unsigned res_alloc_slot(struct il_code_block *block) {
     unsigned slot_no;
 
-    for (slot_no = 0; slot_no < SH4_REGISTER_COUNT; slot_no++)
+    for (slot_no = 0; slot_no < MAX_SLOTS; slot_no++)
         if (!slot_status[slot_no])
             break;
-    if (slot_no == SH4_REGISTER_COUNT)
+    if (slot_no == MAX_SLOTS)
         RAISE_ERROR(ERROR_INTEGRITY); // out of slots
     slot_status[slot_no] = true;
     if (slot_no + 1 > block->n_slots) {
