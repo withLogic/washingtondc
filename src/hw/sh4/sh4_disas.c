@@ -78,7 +78,8 @@ static unsigned n_slots_in_use;
 static unsigned max_slots;
 
 static void res_associate_reg(unsigned reg_no, unsigned slot_no);
-
+static void res_disassociate_reg(struct il_code_block *block,
+                                 unsigned reg_no);
 static unsigned res_alloc_slot(struct il_code_block *block);
 static void res_free_slot(unsigned slot_no);
 
@@ -213,7 +214,7 @@ bool sh4_disas_rts(struct il_code_block *block, unsigned pc,
     struct jit_inst jit_inst;
 
     unsigned slot_no = reg_slot(dreamcast_get_cpu(), block, SH4_REG_PR);
-    jit_prepare_jump(&jit_inst, slot_no, 0);
+    jit_prepare_jump(&jit_inst, slot_no);
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
@@ -231,7 +232,7 @@ bool sh4_disas_rte(struct il_code_block *block, unsigned pc,
     struct jit_inst jit_inst;
 
     unsigned slot_no = reg_slot(dreamcast_get_cpu(), block, SH4_REG_SPC);
-    jit_prepare_jump(&jit_inst, slot_no, 0);
+    jit_prepare_jump(&jit_inst, slot_no);
     il_code_block_push_inst(block, &jit_inst);
 
     /*
@@ -263,7 +264,10 @@ bool sh4_disas_braf_rn(struct il_code_block *block, unsigned pc,
     unsigned jump_offs = pc + 4;
 
     unsigned slot_no = reg_slot(dreamcast_get_cpu(), block, SH4_REG_R0 + reg_no);
-    jit_prepare_jump(&jit_inst, slot_no, jump_offs);
+    res_disassociate_reg(block, SH4_REG_R0 + reg_no);
+    jit_add_const32(&jit_inst, slot_no, jump_offs);
+    il_code_block_push_inst(block, &jit_inst);
+    jit_prepare_jump(&jit_inst, slot_no);
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
@@ -283,7 +287,10 @@ bool sh4_disas_bsrf_rn(struct il_code_block *block, unsigned pc,
     unsigned jump_offs = pc + 4;
 
     unsigned slot_no = reg_slot(dreamcast_get_cpu(), block, SH4_REG_R0 + reg_no);
-    jit_prepare_jump(&jit_inst, slot_no, jump_offs);
+    res_disassociate_reg(block, SH4_REG_R0 + reg_no);
+    jit_add_const32(&jit_inst, slot_no, jump_offs);
+    il_code_block_push_inst(block, &jit_inst);
+    jit_prepare_jump(&jit_inst, slot_no);
     il_code_block_push_inst(block, &jit_inst);
 
     slot_no = reg_slot_noload(dreamcast_get_cpu(), block, SH4_REG_PR);
@@ -448,7 +455,7 @@ bool sh4_disas_jmp_arn(struct il_code_block *block, unsigned pc,
     struct jit_inst jit_inst;
 
     unsigned slot_no = reg_slot(dreamcast_get_cpu(), block, SH4_REG_R0 + reg_no);
-    jit_prepare_jump(&jit_inst, slot_no, 0);
+    jit_prepare_jump(&jit_inst, slot_no);
     il_code_block_push_inst(block, &jit_inst);
 
     sh4_disas_delay_slot(block, pc + 2);
@@ -467,7 +474,7 @@ bool sh4_disas_jsr_arn(struct il_code_block *block, unsigned pc,
     struct jit_inst jit_inst;
 
     unsigned slot_no = reg_slot(dreamcast_get_cpu(), block, SH4_REG_R0 + reg_no);
-    jit_prepare_jump(&jit_inst, slot_no, 0);
+    jit_prepare_jump(&jit_inst, slot_no);
     il_code_block_push_inst(block, &jit_inst);
 
     slot_no = reg_slot_noload(dreamcast_get_cpu(), block, SH4_REG_PR);
@@ -611,6 +618,19 @@ static unsigned res_alloc_slot(struct il_code_block *block) {
 static void res_associate_reg(unsigned reg_no, unsigned slot_no) {
     struct residency *res = reg_map + reg_no;
     res->slot_no = slot_no;
+}
+
+/*
+ * drain the given register and then set its status to REG_STATUS_SH4.  The
+ * slot the register resided in is still valid and its value is unchanged, but
+ * it is no longer associated with the given register.  The caller will need to
+ * call res_free_slot on that slot when it is no longer needed.
+ */
+static void res_disassociate_reg(struct il_code_block *block,
+                                 unsigned reg_no) {
+    res_drain_reg(block, reg_no);
+    struct residency *res = reg_map + reg_no;
+    res->stat = REG_STATUS_SH4;
 }
 
 static void res_free_slot(unsigned slot_no) {

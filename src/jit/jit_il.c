@@ -29,11 +29,9 @@ void jit_fallback(struct jit_inst *op,
     op->immed.fallback.inst.inst = inst;
 }
 
-void jit_prepare_jump(struct jit_inst *op, unsigned slot_idx,
-                      unsigned offs) {
+void jit_prepare_jump(struct jit_inst *op, unsigned slot_idx) {
     op->op = JIT_OP_PREPARE_JUMP;
     op->immed.prepare_jump.slot_idx = slot_idx;
-    op->immed.prepare_jump.offs = offs;
 }
 
 void jit_prepare_jump_const(struct jit_inst *op, unsigned new_pc) {

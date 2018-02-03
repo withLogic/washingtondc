@@ -90,16 +90,15 @@ struct jit_fallback_immed {
 };
 
 struct prepare_jump_immed {
-    unsigned slot_idx;
-    unsigned offs; // constant offset added to the register
+    unsigned slot_idx; // index to the slot where the jump address is stored
 };
 
 struct prepare_jump_const_immed {
-    unsigned new_pc;
+    unsigned new_pc; // constant jump address
 };
 
 struct prepare_alt_jump_immed {
-    unsigned new_pc;
+    unsigned new_pc; // constant jump address
 };
 
 struct set_cond_jump_based_on_t_immed {
@@ -172,7 +171,7 @@ struct jit_inst {
 
 void jit_fallback(struct jit_inst *op,
                   void(*fallback_fn)(Sh4*,Sh4OpArgs), inst_t inst);
-void jit_prepare_jump(struct jit_inst *op, unsigned slot_idx, unsigned offs);
+void jit_prepare_jump(struct jit_inst *op, unsigned slot_idx);
 void jit_prepare_jump_const(struct jit_inst *op, unsigned new_pc);
 void jit_prepare_alt_jump(struct jit_inst *op, unsigned new_pc);
 void jit_jump(struct jit_inst *op);
