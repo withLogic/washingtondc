@@ -98,3 +98,9 @@ void jit_store_slot(struct jit_inst *op, unsigned slot_no, uint32_t *dst) {
     op->immed.store_slot.dst = dst;
     op->immed.store_slot.slot_no = slot_no;
 }
+
+void jit_add(struct jit_inst *op, unsigned slot_src, unsigned slot_dst) {
+    op->op = JIT_OP_ADD;
+    op->immed.add.slot_src = slot_src;
+    op->immed.add.slot_dst = slot_dst;
+}

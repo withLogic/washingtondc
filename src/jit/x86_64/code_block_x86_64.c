@@ -333,6 +333,9 @@ void code_block_x86_64_compile(struct code_block_x86_64 *out,
         case JIT_OP_STORE_SLOT:
             RAISE_ERROR(ERROR_UNIMPLEMENTED);
             break;
+        case JIT_OP_ADD:
+            RAISE_ERROR(ERROR_UNIMPLEMENTED);
+            break;
         }
         inst++;
     }
