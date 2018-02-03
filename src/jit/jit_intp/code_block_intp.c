@@ -127,8 +127,8 @@ void code_block_intp_exec(struct code_block_intp const *block) {
             inst++;
             break;
         case JIT_OP_SIGN_EXTEND_16:
-            cpu->reg[inst->immed.sign_extend_16.reg_no] =
-                (int32_t)(int16_t)cpu->reg[inst->immed.sign_extend_16.reg_no];
+            block->slots[inst->immed.sign_extend_16.slot_no] =
+                (int32_t)(int16_t)block->slots[inst->immed.sign_extend_16.slot_no];
             inst++;
             break;
         case JIT_OP_READ_32_SLOT:

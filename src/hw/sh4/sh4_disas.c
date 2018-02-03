@@ -491,15 +491,12 @@ bool sh4_disas_movw_a_disp_pc_rn(struct il_code_block *block, unsigned pc,
     addr32_t addr = disp * 2 + pc + 4;
     Sh4 *cpu = dreamcast_get_cpu();
 
-    /* res_invalidate_reg(reg_no); */
     unsigned slot_no = reg_slot_noload(cpu, block, reg_no);
+
     jit_read_16_slot(&jit_inst, addr, slot_no);
     il_code_block_push_inst(block, &jit_inst);
-    /* res_drain_reg(block, reg_no); */
 
-    res_drain_reg(block, reg_no);
-    res_invalidate_reg(reg_no);
-    jit_sign_extend_16(&jit_inst, reg_no);
+    jit_sign_extend_16(&jit_inst, slot_no);
     il_code_block_push_inst(block, &jit_inst);
 
     return true;

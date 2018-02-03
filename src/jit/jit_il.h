@@ -115,7 +115,7 @@ struct read_16_slot_immed {
 };
 
 struct sign_extend_16_immed {
-    unsigned reg_no;
+    unsigned slot_no;
 };
 
 struct read_32_slot_immed {
@@ -164,7 +164,7 @@ void jit_jump_cond(struct jit_inst *op);
 void jit_set_reg(struct jit_inst *op, unsigned reg_idx, uint32_t new_val);
 void jit_restore_sr(struct jit_inst *op, unsigned slot_no);
 void jit_read_16_slot(struct jit_inst *op, addr32_t addr, unsigned slot_no);
-void jit_sign_extend_16(struct jit_inst *op, unsigned reg_no);
+void jit_sign_extend_16(struct jit_inst *op, unsigned slot_no);
 void jit_read_32_slot(struct jit_inst *op, addr32_t addr, unsigned slot_no);
 void jit_load_slot(struct jit_inst *op, unsigned slot_no, uint32_t const *src);
 void jit_store_slot(struct jit_inst *op, unsigned slot_no, uint32_t *dst);

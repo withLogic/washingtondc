@@ -247,11 +247,10 @@ void emit_read_16_reg(Sh4 *sh4, struct jit_inst const *inst) {
 
 // JIT_OP_SIGN_EXTEND_16 implementation
 void emit_sign_extend_16(Sh4 *sh4, struct jit_inst const *inst) {
-    // void x86asm_movsx_indreg16_reg32(unsigned reg_src, unsigned reg_dst);
-    void *reg_ptr = sh4->reg + inst->immed.sign_extend_16.reg_no;
-    x86asm_mov_imm64_reg64((uint64_t)(uintptr_t)reg_ptr, RAX);
-    x86asm_movsx_indreg16_reg32(RAX, ECX);
-    x86asm_mov_reg32_indreg32(ECX, RAX);
+    /* void *reg_ptr = sh4->reg + inst->immed.sign_extend_16.reg_no; */
+    /* x86asm_mov_imm64_reg64((uint64_t)(uintptr_t)reg_ptr, RAX); */
+    /* x86asm_movsx_indreg16_reg32(RAX, ECX); */
+    /* x86asm_mov_reg32_indreg32(ECX, RAX); */
 }
 
 // JIT_OP_READ_32_REG implementation
@@ -317,7 +316,8 @@ void code_block_x86_64_compile(struct code_block_x86_64 *out,
             /* emit_read_16_reg(sh4, inst); */
             break;
         case JIT_OP_SIGN_EXTEND_16:
-            emit_sign_extend_16(sh4, inst);
+            RAISE_ERROR(ERROR_UNIMPLEMENTED);
+            /* emit_sign_extend_16(sh4, inst); */
             break;
         case JIT_OP_READ_32_SLOT:
             RAISE_ERROR(ERROR_UNIMPLEMENTED);

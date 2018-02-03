@@ -76,9 +76,9 @@ void jit_read_16_slot(struct jit_inst *op, addr32_t addr, unsigned slot_no) {
     op->immed.read_16_slot.slot_no = slot_no;
 }
 
-void jit_sign_extend_16(struct jit_inst *op, unsigned reg_no) {
+void jit_sign_extend_16(struct jit_inst *op, unsigned slot_no) {
     op->op = JIT_OP_SIGN_EXTEND_16;
-    op->immed.sign_extend_16.reg_no = reg_no;
+    op->immed.sign_extend_16.slot_no = slot_no;
 }
 
 void jit_read_32_slot(struct jit_inst *op, addr32_t addr, unsigned slot_no) {
