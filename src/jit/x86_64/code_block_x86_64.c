@@ -116,13 +116,14 @@ void emit_fallback(Sh4 *sh4, struct jit_inst const *inst) {
 
 // JIT_OP_PREPARE_JUMP implementation
 void emit_prepare_jump(Sh4 *sh4, struct jit_inst const *inst) {
-    unsigned reg_idx = inst->immed.prepare_jump.reg_idx;
-    unsigned offs = inst->immed.prepare_jump.offs;
+    RAISE_ERROR(ERROR_UNIMPLEMENTED);
+    /* unsigned reg_idx = inst->immed.prepare_jump.reg_idx; */
+    /* unsigned offs = inst->immed.prepare_jump.offs; */
 
-    x86asm_mov_imm64_reg64((uintptr_t)(sh4->reg + reg_idx), R9);
-    x86asm_mov_indreg32_reg32(R9, EAX);
-    x86asm_add_imm32_eax(offs);
-    x86asm_mov_reg32_reg32(EAX, JMP_ADDR_REG);
+    /* x86asm_mov_imm64_reg64((uintptr_t)(sh4->reg + reg_idx), R9); */
+    /* x86asm_mov_indreg32_reg32(R9, EAX); */
+    /* x86asm_add_imm32_eax(offs); */
+    /* x86asm_mov_reg32_reg32(EAX, JMP_ADDR_REG); */
 }
 
 // JIT_OP_PREPARE_JUMP_CONST implementation
@@ -289,7 +290,8 @@ void code_block_x86_64_compile(struct code_block_x86_64 *out,
             emit_fallback(sh4, inst);
             break;
         case JIT_OP_PREPARE_JUMP:
-            emit_prepare_jump(sh4, inst);
+            RAISE_ERROR(ERROR_UNIMPLEMENTED);
+            /* emit_prepare_jump(sh4, inst); */
             break;
         case JIT_OP_PREPARE_JUMP_CONST:
             emit_prepare_jump_const(sh4, inst);

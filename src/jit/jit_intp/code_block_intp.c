@@ -74,7 +74,7 @@ void code_block_intp_exec(struct code_block_intp const *block) {
             inst++;
             break;
         case JIT_OP_PREPARE_JUMP:
-            jump_addr = cpu->reg[inst->immed.prepare_jump.reg_idx] +
+            jump_addr = block->slots[inst->immed.prepare_jump.slot_idx] +
                 inst->immed.prepare_jump.offs;
             inst++;
             break;

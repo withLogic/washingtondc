@@ -84,7 +84,7 @@ struct jit_fallback_immed {
 };
 
 struct prepare_jump_immed {
-    unsigned reg_idx;
+    unsigned slot_idx;
     unsigned offs; // constant offset added to the register
 };
 
@@ -155,7 +155,7 @@ struct jit_inst {
 
 void jit_fallback(struct jit_inst *op,
                   void(*fallback_fn)(Sh4*,Sh4OpArgs), inst_t inst);
-void jit_prepare_jump(struct jit_inst *op, unsigned sh4_reg_idx, unsigned offs);
+void jit_prepare_jump(struct jit_inst *op, unsigned slot_idx, unsigned offs);
 void jit_prepare_jump_const(struct jit_inst *op, unsigned new_pc);
 void jit_prepare_alt_jump(struct jit_inst *op, unsigned new_pc);
 void jit_jump(struct jit_inst *op);
